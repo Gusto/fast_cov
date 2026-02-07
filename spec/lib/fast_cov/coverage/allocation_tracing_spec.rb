@@ -44,11 +44,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
 
     context "Data structs (Ruby >= 3.2)" do
       before do
-        if RUBY_VERSION < "3.2"
-          skip "Data.define requires Ruby 3.2+"
-        else
-          require_relative "../../../fixtures/app/model/measure"
-        end
+        require_relative "../../../fixtures/app/model/measure"
       end
 
       it "tracks coverage for Data subclasses" do

@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+
+system("bundle exec rake compile --silent 2>/dev/null") || abort("Failed to compile extension")
+
+require "fast_cov"
+require_relative "../lib/fast_cov/benchmark/runner"
+require_relative "../lib/fast_cov/benchmark/scenarios"
+
+fixtures_dir = File.expand_path("../spec/fixtures", __dir__)
+require_relative "../spec/fixtures/calculator/calculator"
+require_relative "../spec/fixtures/calculator/operations/constant_reader"
+require_relative "../spec/fixtures/app/model/my_model"
+require_relative "../spec/fixtures/app/model/my_struct"
+require_relative "../spec/fixtures/app/model/dynamic_model"
+
+runner = FastCov::Benchmark::Runner.new(
+  iterations: Integer(ENV.fetch("ITERATIONS", 1000))
+)
+
+FastCov::Benchmark::Scenarios.register(runner, fixtures_dir: fixtures_dir)
+
+runner.run(save_baseline: ARGV.include?("--baseline"))

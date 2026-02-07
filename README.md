@@ -15,7 +15,7 @@ FastCov hooks directly into the Ruby VM's event system, avoiding the overhead of
 
 ## Requirements
 
-- Ruby >= 3.1.0 (MRI only)
+- Ruby >= 3.4.0 (MRI only)
 - macOS or Linux (not supported on Windows)
 
 ## Installation
@@ -192,6 +192,43 @@ bundle exec rake compile  # compile the C extension
 bundle exec rake spec     # run tests (compiles first)
 ```
 
+### Benchmarking
+
+FastCov includes a benchmarking suite for catching performance regressions. The workflow is: save a baseline before your change, develop, then compare against the baseline when you're done.
+
+```sh
+# 1. Before making changes, save the current performance as baseline
+bin/benchmark --baseline
+
+# 2. Make your changes...
+
+# 3. Compare against the baseline
+bin/benchmark
+```
+
+The output shows the average time per iteration, iterations per second, and the % change vs the baseline for each scenario:
+
+```
+FastCov Benchmark Suite
+Ruby 4.0.0, arm64-darwin24
+1000 iterations x 7 samples (median)
+========================================================================
+
+                                           avg (ms)          ips    vs baseline
+-------------------------------------------------------------------------------
+  Line coverage (small)                       0.216       4631.4         -2.7%
+  Line coverage (many files)                  0.316       3163.9         -3.9%
+  Allocation tracing                          0.208       4813.4         -7.1%
+  Constant resolution (cold cache)            1.051        951.2         -1.8%
+  Constant resolution (warm cache)            0.353       2833.0         -3.3%
+  Rapid start/stop (100x)                    20.303         49.3         -1.3%
+  Multi-threaded coverage                     0.236       4241.8         -3.9%
+```
+
+Negative percentages mean faster. Each scenario runs 1000 iterations across 7 samples and reports the median to filter outliers. Override iteration count with `ITERATIONS=5000 bin/benchmark`.
+
+You can re-save the baseline at any time with `bin/benchmark --baseline`.
+
 ### Project structure
 
 ```
@@ -206,7 +243,10 @@ fast_cov/
 │   └── fast_cov/
 │       ├── version.rb        # Version constant
 │       ├── configuration.rb  # FastCov.configure
-│       └── cache.rb          # Disk persistence
+│       ├── cache.rb          # In-memory cache
+│       └── benchmark/
+│           ├── runner.rb     # Measurement harness + baseline comparison
+│           └── scenarios.rb  # Benchmark scenario definitions
 ├── spec/
 │   ├── lib/fast_cov/         # Tests organized by feature
 │   │   ├── coverage/
@@ -221,6 +261,7 @@ fast_cov/
 │   │   └── configuration_spec.rb
 │   └── fixtures/             # Calculator and app model fixtures
 ├── bin/
+│   ├── benchmark             # Performance benchmarks with baseline comparison
 │   ├── console               # IRB with FastCov loaded
 │   └── rspec                 # RSpec binstub
 ├── Gemfile

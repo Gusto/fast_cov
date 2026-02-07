@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.summary = "Fast native code coverage tracking for Ruby test impact analysis"
   spec.description = "A high-performance C extension that tracks which Ruby source files are executed during test runs, enabling test impact analysis."
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.1.0"
+  spec.required_ruby_version = ">= 3.4.0"
 
   spec.files = Dir["lib/**/*.rb", "ext/**/*.{rb,c,h}", "LICENSE", "README.md"]
   spec.require_paths = ["lib"]
