@@ -16,16 +16,13 @@ RSpec.describe FastCov::Coverage, "caching" do
     expect(warm_result.keys.sort).to eq(cold_result.keys.sort)
   end
 
-  it "resolves constants correctly even after cache is cleared mid-run" do
-    # First run populates cache
+  it "resolves constants correctly even after cache is cleared between runs" do
     subject.start
     ConstantReader.new.operations
     first_result = subject.stop
 
-    # Clear cache between runs
     FastCov::Cache.clear
 
-    # Second run should still produce correct results from a cold cache
     subject.start
     ConstantReader.new.operations
     second_result = subject.stop

@@ -7,5 +7,3 @@ require_relative "fast_cov/cache"
 
 module FastCov
 end
-
-FastCov::Cache.setup_autosave

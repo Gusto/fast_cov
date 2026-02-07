@@ -2,10 +2,7 @@
 
 module FastCov
   class Configuration
-    attr_accessor :cache_path
-
     def initialize
-      @cache_path = "tmp/cache/fast_cov"
     end
 
     def reset

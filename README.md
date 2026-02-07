@@ -11,7 +11,7 @@ FastCov hooks directly into the Ruby VM's event system, avoiding the overhead of
 - **Constant reference resolution** -- scans bytecode for constant references (`opt_getconstant_path` instructions) and traces them to their defining files, transitively
 - **Path filtering** -- only tracks files under a configurable root, with an optional ignored path for excluding vendored dependencies
 - **Threading modes** -- single-threaded (per-thread isolation) or multi-threaded (global, tracks all threads)
-- **Disk-backed cache** -- caches constant resolution results with MD5-based invalidation, persists across test suite runs
+- **In-memory cache** -- caches constant resolution results with MD5-based invalidation, shared across all Coverage instances within a process
 
 ## Requirements
 
@@ -158,19 +158,8 @@ result = cov.stop
 
 ```ruby
 FastCov.configure do |config|
-  config.cache_path = "tmp/cache/fast_cov"  # default
+  # Configuration options will be added here as features grow.
 end
-```
-
-| Option | Default | Description |
-|---|---|---|
-| `cache_path` | `"tmp/cache/fast_cov"` | Directory for the disk-backed cache file. Set to `nil` to disable disk persistence. |
-
-Access the current configuration:
-
-```ruby
-FastCov.configuration.cache_path
-# => "tmp/cache/fast_cov"
 ```
 
 Reset to defaults:
@@ -181,50 +170,17 @@ FastCov.configuration.reset
 
 ## Cache
 
-FastCov caches the results of constant reference resolution (bytecode scanning) so that files only need to be compiled and analyzed once. The cache is:
+FastCov caches the results of constant reference resolution (bytecode scanning) in memory so that files only need to be compiled and analyzed once per process. The cache is:
 
 - **Process-level** -- shared across all `FastCov::Coverage` instances
-- **Content-addressed** -- entries are keyed by file path and invalidated when the file's MD5 digest changes
-- **Disk-backed** -- persists across test suite runs via Marshal serialization
-- **Extensible** -- the cache structure supports future cache types beyond constant references
-
-The cache auto-saves on process exit via an `at_exit` hook (registered when `fast_cov` is required).
-
-### Cache API
+- **Content-addressed** -- entries are invalidated when the file's MD5 digest changes
+- **Automatic** -- populated transparently during `stop`, no setup needed
 
 ```ruby
-# Save/load explicitly
-FastCov::Cache.save                    # saves to configured cache_path
-FastCov::Cache.save("/custom/path")    # saves to a specific directory
-FastCov::Cache.load                    # loads from configured cache_path
-FastCov::Cache.load("/custom/path")    # loads from a specific directory
-
-# Inspect
-FastCov::Cache.loaded?   # true if cache was loaded from disk this process
 FastCov::Cache.data      # the raw cache hash
-
-# Clear
 FastCov::Cache.clear     # empties the in-memory cache
-
-# Replace (for advanced use)
-FastCov::Cache.data = { "const_refs" => { ... } }
+FastCov::Cache.data = {} # replace cache contents (advanced use)
 ```
-
-### Typical test suite setup
-
-```ruby
-# spec_helper.rb or test_helper.rb
-require "fast_cov"
-
-FastCov.configure do |config|
-  config.cache_path = File.join(__dir__, "..", "tmp", "fast_cov_cache")
-end
-
-# Load cache from previous run (if it exists)
-FastCov::Cache.load
-```
-
-The `at_exit` hook handles saving automatically. No explicit save call is needed.
 
 ## Development
 
