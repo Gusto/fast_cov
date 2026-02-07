@@ -1,0 +1,19 @@
+# Compiled extension
+lib/fast_cov/fast_cov.bundle
+lib/fast_cov/fast_cov.so
+lib/fast_cov/fast_cov.o
+tmp/
+
+# Bundler
+Gemfile.lock
+vendor/bundle/
+.bundle/
+
+# Cache
+fast_cov_cache.marshal
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

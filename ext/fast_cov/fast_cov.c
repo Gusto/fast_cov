@@ -1,0 +1,610 @@
+#include <ruby.h>
+#include <ruby/debug.h>
+#include <ruby/st.h>
+
+#include <stdbool.h>
+
+#include "fast_cov.h"
+
+// FastCov: native C extension for fast Ruby code coverage tracking.
+//
+// Tracks which source files are executed during a test run by hooking into
+// Ruby VM events. Designed for test impact analysis.
+
+#define PROFILE_FRAMES_BUFFER_SIZE 1
+#define MAX_CONST_RESOLUTION_ROUNDS 10
+
+enum threading_mode { single, multi };
+
+// Cached IDs for iseq constant resolution
+static ID id_compile_file;
+static ID id_to_a;
+static ID id_each_child;
+static ID id_keys;
+static VALUE sym_opt_getconstant_path;
+static VALUE cInstructionSequence;
+
+// Cache infrastructure
+static VALUE fast_cov_cache_hash; // process-level cache
+static VALUE cDigest;             // Digest::MD5
+static ID id_file;
+static ID id_hexdigest;
+static ID id_clear;
+static ID id_merge_bang;
+
+// Forward declarations
+static void on_newobj_event(VALUE tracepoint_data, void *data);
+
+static int mark_key_for_gc_i(st_data_t key, st_data_t _value,
+                              st_data_t _data) {
+  rb_gc_mark((VALUE)key);
+  return ST_CONTINUE;
+}
+
+// ---- Data structure -----------------------------------------------------
+
+struct fast_cov_data {
+  VALUE impacted_files;
+
+  char *root;
+  long root_len;
+
+  char *ignored_path;
+  long ignored_path_len;
+
+  uintptr_t last_filename_ptr;
+
+  enum threading_mode threading_mode;
+  VALUE th_covered;
+
+  VALUE object_allocation_tracepoint;
+  st_table *klasses_table;
+};
+
+// ---- GC callbacks -------------------------------------------------------
+
+static void fast_cov_mark(void *ptr) {
+  struct fast_cov_data *data = ptr;
+  rb_gc_mark_movable(data->impacted_files);
+  rb_gc_mark_movable(data->th_covered);
+  rb_gc_mark_movable(data->object_allocation_tracepoint);
+
+  if (data->klasses_table != NULL) {
+    st_foreach(data->klasses_table, mark_key_for_gc_i, 0);
+  }
+}
+
+static void fast_cov_free(void *ptr) {
+  struct fast_cov_data *data = ptr;
+  xfree(data->root);
+  xfree(data->ignored_path);
+  st_free_table(data->klasses_table);
+  xfree(data);
+}
+
+static void fast_cov_compact(void *ptr) {
+  struct fast_cov_data *data = ptr;
+  data->impacted_files = rb_gc_location(data->impacted_files);
+  data->th_covered = rb_gc_location(data->th_covered);
+  data->object_allocation_tracepoint =
+      rb_gc_location(data->object_allocation_tracepoint);
+}
+
+static const rb_data_type_t fast_cov_data_type = {
+    .wrap_struct_name = "fast_cov",
+    .function = {.dmark = fast_cov_mark,
+                 .dfree = fast_cov_free,
+                 .dsize = NULL,
+                 .dcompact = fast_cov_compact},
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY};
+
+// ---- Allocator ----------------------------------------------------------
+
+static VALUE fast_cov_allocate(VALUE klass) {
+  struct fast_cov_data *data;
+  VALUE obj = TypedData_Make_Struct(klass, struct fast_cov_data,
+                                   &fast_cov_data_type, data);
+
+  data->impacted_files = rb_hash_new();
+  data->root = NULL;
+  data->root_len = 0;
+  data->ignored_path = NULL;
+  data->ignored_path_len = 0;
+  data->last_filename_ptr = 0;
+  data->threading_mode = multi;
+
+  data->object_allocation_tracepoint = Qnil;
+  data->klasses_table = st_init_numtable();
+
+  return obj;
+}
+
+// ---- Internal helpers ---------------------------------------------------
+
+static bool record_impacted_file(struct fast_cov_data *data, VALUE filename) {
+  if (!fast_cov_is_path_included(RSTRING_PTR(filename), data->root,
+                                 data->root_len, data->ignored_path,
+                                 data->ignored_path_len)) {
+    return false;
+  }
+
+  rb_hash_aset(data->impacted_files, filename, Qtrue);
+  return true;
+}
+
+// ---- Line event callback ------------------------------------------------
+
+static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
+                          ID id, VALUE klass) {
+  struct fast_cov_data *data;
+  TypedData_Get_Struct(self_data, struct fast_cov_data, &fast_cov_data_type,
+                       data);
+
+  const char *c_filename = rb_sourcefile();
+
+  uintptr_t current_filename_ptr = (uintptr_t)c_filename;
+  if (data->last_filename_ptr == current_filename_ptr) {
+    return;
+  }
+  data->last_filename_ptr = current_filename_ptr;
+
+  VALUE top_frame;
+  int captured_frames =
+      rb_profile_frames(0, PROFILE_FRAMES_BUFFER_SIZE, &top_frame, NULL);
+
+  if (captured_frames != PROFILE_FRAMES_BUFFER_SIZE) {
+    return;
+  }
+
+  VALUE filename = rb_profile_frame_path(top_frame);
+  if (filename == Qnil) {
+    return;
+  }
+
+  record_impacted_file(data, filename);
+}
+
+// ---- Allocation tracing helpers -----------------------------------------
+
+static VALUE safely_get_class_name(VALUE klass) {
+  return fast_cov_rescue_nil(rb_class_name, klass);
+}
+
+static VALUE safely_get_mod_ancestors(VALUE klass) {
+  return fast_cov_rescue_nil(rb_mod_ancestors, klass);
+}
+
+static bool record_impacted_klass(struct fast_cov_data *data, VALUE klass) {
+  VALUE klass_name = safely_get_class_name(klass);
+  if (klass_name == Qnil) {
+    return false;
+  }
+
+  VALUE filename = fast_cov_resolve_const_to_file(klass_name);
+  if (filename == Qnil) {
+    return false;
+  }
+
+  return record_impacted_file(data, filename);
+}
+
+static int each_instantiated_klass(st_data_t key, st_data_t _value,
+                                   st_data_t cb_data) {
+  VALUE klass = (VALUE)key;
+  struct fast_cov_data *data = (struct fast_cov_data *)cb_data;
+
+  VALUE ancestors = safely_get_mod_ancestors(klass);
+  if (ancestors == Qnil || !RB_TYPE_P(ancestors, T_ARRAY)) {
+    return ST_CONTINUE;
+  }
+
+  long len = RARRAY_LEN(ancestors);
+  for (long i = 0; i < len; i++) {
+    VALUE mod = rb_ary_entry(ancestors, i);
+    if (mod == Qnil) {
+      continue;
+    }
+    record_impacted_klass(data, mod);
+  }
+
+  return ST_CONTINUE;
+}
+
+// ---- Newobj event callback ----------------------------------------------
+
+static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
+  rb_trace_arg_t *tracearg = rb_tracearg_from_tracepoint(tracepoint_data);
+  VALUE new_object = rb_tracearg_object(tracearg);
+
+  enum ruby_value_type type = rb_type(new_object);
+  if (type != RUBY_T_OBJECT && type != RUBY_T_STRUCT) {
+    return;
+  }
+
+  VALUE klass = rb_class_of(new_object);
+  if (klass == Qnil || klass == 0) {
+    return;
+  }
+  if (rb_mod_name(klass) == Qnil) {
+    return;
+  }
+
+  struct fast_cov_data *data = (struct fast_cov_data *)raw_data;
+  st_insert(data->klasses_table, (st_data_t)klass, 1);
+}
+
+// ---- Constant reference resolution (cached) -----------------------------
+
+// Joins [:A, :B] into "A::B". Skips empty symbols (absolute path markers).
+static VALUE join_const_path(VALUE symbol_array) {
+  long len = RARRAY_LEN(symbol_array);
+  if (len == 0) return Qnil;
+
+  VALUE separator = rb_str_new_literal("::");
+  VALUE parts = rb_ary_new_capa(len);
+
+  for (long i = 0; i < len; i++) {
+    VALUE sym = rb_ary_entry(symbol_array, i);
+    if (!SYMBOL_P(sym)) continue;
+    VALUE str = rb_sym2str(sym);
+    if (RSTRING_LEN(str) == 0) continue;
+    rb_ary_push(parts, str);
+  }
+
+  if (RARRAY_LEN(parts) == 0) return Qnil;
+  return rb_ary_join(parts, separator);
+}
+
+// Collects constant name strings from an iseq into const_names array.
+static void collect_const_names_from_iseq(VALUE iseq, VALUE const_names);
+
+static VALUE collect_child_callback(RB_BLOCK_CALL_FUNC_ARGLIST(child_iseq,
+                                                               const_names)) {
+  collect_const_names_from_iseq(child_iseq, const_names);
+  return Qnil;
+}
+
+static void collect_const_names_from_iseq(VALUE iseq, VALUE const_names) {
+  VALUE iseq_array = rb_funcall(iseq, id_to_a, 0);
+  if (!RB_TYPE_P(iseq_array, T_ARRAY) || RARRAY_LEN(iseq_array) < 14) {
+    return;
+  }
+
+  VALUE instructions = rb_ary_entry(iseq_array, 13);
+  if (!RB_TYPE_P(instructions, T_ARRAY)) {
+    return;
+  }
+
+  long insn_len = RARRAY_LEN(instructions);
+  for (long i = 0; i < insn_len; i++) {
+    VALUE insn = rb_ary_entry(instructions, i);
+
+    if (!RB_TYPE_P(insn, T_ARRAY) || RARRAY_LEN(insn) < 2) {
+      continue;
+    }
+
+    VALUE opcode = rb_ary_entry(insn, 0);
+    if (opcode != sym_opt_getconstant_path) {
+      continue;
+    }
+
+    VALUE const_path_syms = rb_ary_entry(insn, 1);
+    if (!RB_TYPE_P(const_path_syms, T_ARRAY) ||
+        RARRAY_LEN(const_path_syms) == 0) {
+      continue;
+    }
+
+    VALUE const_name = join_const_path(const_path_syms);
+    if (!NIL_P(const_name)) {
+      rb_ary_push(const_names, const_name);
+    }
+  }
+
+  if (rb_respond_to(iseq, id_each_child)) {
+    rb_block_call(iseq, id_each_child, 0, NULL, collect_child_callback,
+                  const_names);
+  }
+}
+
+// Computes MD5 hexdigest of a file's contents.
+static VALUE compute_file_digest_body(VALUE filename) {
+  VALUE digest_obj = rb_funcall(cDigest, id_file, 1, filename);
+  return rb_funcall(digest_obj, id_hexdigest, 0);
+}
+
+static VALUE compute_file_digest(VALUE filename) {
+  int exception_state;
+  VALUE result =
+      rb_protect(compute_file_digest_body, filename, &exception_state);
+  if (exception_state != 0) {
+    rb_set_errinfo(Qnil);
+    return Qnil;
+  }
+  return result;
+}
+
+// Compile file and collect constant names.
+struct compile_collect_args {
+  VALUE filename;
+};
+
+static VALUE compile_and_collect_body(VALUE raw_args) {
+  struct compile_collect_args *args = (struct compile_collect_args *)raw_args;
+  VALUE iseq =
+      rb_funcall(cInstructionSequence, id_compile_file, 1, args->filename);
+  VALUE const_names = rb_ary_new();
+  collect_const_names_from_iseq(iseq, const_names);
+  return const_names;
+}
+
+// Returns an array of constant name strings for a file, using the cache.
+static VALUE get_const_refs_for_file(VALUE filename) {
+  VALUE const_refs_hash =
+      rb_hash_lookup(fast_cov_cache_hash, rb_str_new_literal("const_refs"));
+
+  VALUE cached_entry = rb_hash_lookup(const_refs_hash, filename);
+
+  VALUE current_digest = compute_file_digest(filename);
+  if (NIL_P(current_digest)) {
+    if (!NIL_P(cached_entry)) {
+      rb_hash_delete(const_refs_hash, filename);
+    }
+    return Qnil;
+  }
+
+  // Cache hit: digest matches
+  if (!NIL_P(cached_entry) && RB_TYPE_P(cached_entry, T_HASH)) {
+    VALUE cached_digest =
+        rb_hash_lookup(cached_entry, rb_str_new_literal("digest"));
+
+    if (!NIL_P(cached_digest) &&
+        rb_str_equal(cached_digest, current_digest) == Qtrue) {
+      return rb_hash_lookup(cached_entry, rb_str_new_literal("refs"));
+    }
+  }
+
+  // Cache miss: compile and scan
+  struct compile_collect_args args = {.filename = filename};
+  int exception_state;
+  VALUE const_names =
+      rb_protect(compile_and_collect_body, (VALUE)&args, &exception_state);
+  if (exception_state != 0) {
+    rb_set_errinfo(Qnil);
+    if (!NIL_P(cached_entry)) {
+      rb_hash_delete(const_refs_hash, filename);
+    }
+    return Qnil;
+  }
+
+  // Store in cache
+  VALUE new_entry = rb_hash_new();
+  rb_hash_aset(new_entry, rb_str_new_literal("digest"), current_digest);
+  rb_hash_aset(new_entry, rb_str_new_literal("refs"), const_names);
+  rb_hash_aset(const_refs_hash, filename, new_entry);
+
+  return const_names;
+}
+
+static void resolve_constant_references(struct fast_cov_data *data) {
+  VALUE seen_consts = rb_hash_new();
+  VALUE processed_files = rb_hash_new();
+
+  for (int round = 0; round < MAX_CONST_RESOLUTION_ROUNDS; round++) {
+    VALUE keys = rb_funcall(data->impacted_files, id_keys, 0);
+    long num_keys = RARRAY_LEN(keys);
+    int found_new_file = 0;
+
+    for (long i = 0; i < num_keys; i++) {
+      VALUE filename = rb_ary_entry(keys, i);
+
+      if (rb_hash_lookup(processed_files, filename) != Qnil) {
+        continue;
+      }
+      rb_hash_aset(processed_files, filename, Qtrue);
+
+      VALUE const_names = get_const_refs_for_file(filename);
+      if (NIL_P(const_names) || !RB_TYPE_P(const_names, T_ARRAY)) {
+        continue;
+      }
+
+      long num_refs = RARRAY_LEN(const_names);
+      for (long j = 0; j < num_refs; j++) {
+        VALUE const_name = rb_ary_entry(const_names, j);
+
+        if (rb_hash_lookup(seen_consts, const_name) != Qnil) {
+          continue;
+        }
+        rb_hash_aset(seen_consts, const_name, Qtrue);
+
+        VALUE resolved_file = fast_cov_resolve_const_to_file(const_name);
+        if (NIL_P(resolved_file)) {
+          continue;
+        }
+
+        if (record_impacted_file(data, resolved_file)) {
+          found_new_file = 1;
+        }
+      }
+    }
+
+    if (!found_new_file) {
+      break;
+    }
+  }
+}
+
+// ---- Cache module methods (FastCov::Cache) ------------------------------
+
+static VALUE cache_get_data(VALUE self) { return fast_cov_cache_hash; }
+
+static VALUE cache_set_data(VALUE self, VALUE new_cache) {
+  if (!RB_TYPE_P(new_cache, T_HASH)) {
+    rb_raise(rb_eTypeError, "cache data must be a Hash");
+  }
+  rb_funcall(fast_cov_cache_hash, id_clear, 0);
+  rb_funcall(fast_cov_cache_hash, id_merge_bang, 1, new_cache);
+  return fast_cov_cache_hash;
+}
+
+static VALUE cache_clear(VALUE self) {
+  rb_funcall(fast_cov_cache_hash, id_clear, 0);
+  rb_hash_aset(fast_cov_cache_hash, rb_str_new_literal("const_refs"),
+               rb_hash_new());
+  return Qnil;
+}
+
+// ---- Ruby instance methods ----------------------------------------------
+
+static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
+  VALUE opt;
+  rb_scan_args(argc, argv, "10", &opt);
+
+  VALUE rb_root = rb_hash_lookup(opt, ID2SYM(rb_intern("root")));
+  if (!RTEST(rb_root)) {
+    rb_raise(rb_eArgError, "root is required");
+  }
+
+  VALUE rb_ignored_path =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_path")));
+
+  VALUE rb_threading_mode =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("threading_mode")));
+  enum threading_mode tm;
+  if (rb_threading_mode == ID2SYM(rb_intern("multi"))) {
+    tm = multi;
+  } else if (rb_threading_mode == ID2SYM(rb_intern("single"))) {
+    tm = single;
+  } else {
+    rb_raise(rb_eArgError, "threading mode is invalid");
+  }
+
+  VALUE rb_alloc_tracing =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("use_allocation_tracing")));
+  if (rb_alloc_tracing == Qtrue && tm == single) {
+    rb_raise(
+        rb_eArgError,
+        "allocation tracing is not supported in single threaded mode");
+  }
+
+  struct fast_cov_data *data;
+  TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
+
+  data->threading_mode = tm;
+  data->root_len = RSTRING_LEN(rb_root);
+  data->root =
+      fast_cov_ruby_strndup(RSTRING_PTR(rb_root), data->root_len);
+
+  if (RTEST(rb_ignored_path)) {
+    data->ignored_path_len = RSTRING_LEN(rb_ignored_path);
+    data->ignored_path = fast_cov_ruby_strndup(RSTRING_PTR(rb_ignored_path),
+                                               data->ignored_path_len);
+  }
+
+  if (rb_alloc_tracing == Qtrue) {
+    data->object_allocation_tracepoint = rb_tracepoint_new(
+        Qnil, RUBY_INTERNAL_EVENT_NEWOBJ, on_newobj_event, (void *)data);
+  }
+
+  return Qnil;
+}
+
+static VALUE fast_cov_start(VALUE self) {
+  struct fast_cov_data *data;
+  TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
+
+  if (data->root_len == 0) {
+    rb_raise(rb_eRuntimeError, "root is required");
+  }
+
+  if (data->threading_mode == single) {
+    VALUE thval = rb_thread_current();
+    rb_thread_add_event_hook(thval, on_line_event, RUBY_EVENT_LINE, self);
+    data->th_covered = thval;
+  } else {
+    rb_add_event_hook(on_line_event, RUBY_EVENT_LINE, self);
+  }
+
+  if (data->object_allocation_tracepoint != Qnil) {
+    rb_tracepoint_enable(data->object_allocation_tracepoint);
+  }
+
+  return self;
+}
+
+static VALUE fast_cov_stop(VALUE self) {
+  struct fast_cov_data *data;
+  TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
+
+  if (data->threading_mode == single) {
+    VALUE thval = rb_thread_current();
+    if (!rb_equal(thval, data->th_covered)) {
+      rb_raise(rb_eRuntimeError, "Coverage was not started by this thread");
+    }
+    rb_thread_remove_event_hook(data->th_covered, on_line_event);
+    data->th_covered = Qnil;
+  } else {
+    rb_remove_event_hook(on_line_event);
+  }
+
+  if (data->object_allocation_tracepoint != Qnil) {
+    rb_tracepoint_disable(data->object_allocation_tracepoint);
+  }
+
+  st_foreach(data->klasses_table, each_instantiated_klass, (st_data_t)data);
+  st_clear(data->klasses_table);
+
+  resolve_constant_references(data);
+
+  VALUE res = data->impacted_files;
+
+  data->impacted_files = rb_hash_new();
+  data->last_filename_ptr = 0;
+
+  return res;
+}
+
+// ---- Init ---------------------------------------------------------------
+
+void Init_fast_cov(void) {
+  id_compile_file = rb_intern("compile_file");
+  id_to_a = rb_intern("to_a");
+  id_each_child = rb_intern("each_child");
+  id_keys = rb_intern("keys");
+  id_file = rb_intern("file");
+  id_hexdigest = rb_intern("hexdigest");
+  id_clear = rb_intern("clear");
+  id_merge_bang = rb_intern("merge!");
+
+  sym_opt_getconstant_path = ID2SYM(rb_intern("opt_getconstant_path"));
+  rb_gc_register_address(&sym_opt_getconstant_path);
+
+  VALUE mRubyVM = rb_const_get(rb_cObject, rb_intern("RubyVM"));
+  cInstructionSequence =
+      rb_const_get(mRubyVM, rb_intern("InstructionSequence"));
+  rb_gc_register_address(&cInstructionSequence);
+
+  rb_require("digest/md5");
+  VALUE mDigest = rb_const_get(rb_cObject, rb_intern("Digest"));
+  cDigest = rb_const_get(mDigest, rb_intern("MD5"));
+  rb_gc_register_address(&cDigest);
+
+  // Initialize process-level cache
+  fast_cov_cache_hash = rb_hash_new();
+  rb_gc_register_address(&fast_cov_cache_hash);
+  rb_hash_aset(fast_cov_cache_hash, rb_str_new_literal("const_refs"),
+               rb_hash_new());
+
+  VALUE mFastCov = rb_define_module("FastCov");
+  VALUE cCoverage = rb_define_class_under(mFastCov, "Coverage", rb_cObject);
+
+  rb_define_alloc_func(cCoverage, fast_cov_allocate);
+  rb_define_method(cCoverage, "initialize", fast_cov_initialize, -1);
+  rb_define_method(cCoverage, "start", fast_cov_start, 0);
+  rb_define_method(cCoverage, "stop", fast_cov_stop, 0);
+
+  // FastCov::Cache module (C-defined methods)
+  VALUE mCache = rb_define_module_under(mFastCov, "Cache");
+  rb_define_module_function(mCache, "data", cache_get_data, 0);
+  rb_define_module_function(mCache, "data=", cache_set_data, 1);
+  rb_define_module_function(mCache, "clear", cache_clear, 0);
+}
