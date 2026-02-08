@@ -23,12 +23,11 @@ module FastCov
     end
 
     def install
-      return unless defined?(::FactoryBot)
+      unless defined?(::FactoryBot)
+        raise LoadError, "FactoryBotTracker requires the factory_bot gem to be installed"
+      end
 
-      registry = ::FactoryBot.factories
-      return if registry.singleton_class.ancestors.include?(RegistryPatch)
-
-      registry.singleton_class.prepend(RegistryPatch)
+      ::FactoryBot.factories.singleton_class.prepend(RegistryPatch)
     end
 
     def start

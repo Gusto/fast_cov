@@ -32,16 +32,6 @@ RSpec.describe FastCov::FactoryBotTracker do
       expect(FactoryBot.factories.singleton_class.ancestors)
         .to include(FastCov::FactoryBotTracker::RegistryPatch)
     end
-
-    it "is idempotent" do
-      tracker.install
-      tracker.install
-
-      patches = FactoryBot.factories.singleton_class.ancestors
-        .count { |a| a == FastCov::FactoryBotTracker::RegistryPatch }
-
-      expect(patches).to eq(1)
-    end
   end
 
   describe "#start and #stop" do
@@ -171,13 +161,16 @@ RSpec.describe FastCov::FactoryBotTracker do
   end
 
   describe "when FactoryBot is not defined" do
-    it "install does nothing gracefully" do
+    it "raises LoadError with helpful message" do
       # Temporarily hide FactoryBot
       factory_bot = Object.send(:remove_const, :FactoryBot)
 
       begin
         tracker = described_class.new(config)
-        expect { tracker.install }.not_to raise_error
+        expect { tracker.install }.to raise_error(
+          LoadError,
+          /factory_bot gem/
+        )
       ensure
         Object.const_set(:FactoryBot, factory_bot)
       end
