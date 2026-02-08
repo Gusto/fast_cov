@@ -62,12 +62,16 @@ struct fast_cov_data {
 };
 
 // ---- GC callbacks -------------------------------------------------------
+//
+// We use rb_gc_mark (non-movable, pins objects) instead of rb_gc_mark_movable.
+// On Ruby 3.4, rb_gc_mark_movable + dcompact causes T_NONE crashes during
+// compaction. Pinning avoids this with negligible performance impact.
 
 static void fast_cov_mark(void *ptr) {
   struct fast_cov_data *data = ptr;
-  rb_gc_mark_movable(data->impacted_files);
-  rb_gc_mark_movable(data->th_covered);
-  rb_gc_mark_movable(data->object_allocation_tracepoint);
+  rb_gc_mark(data->impacted_files);
+  rb_gc_mark(data->th_covered);
+  rb_gc_mark(data->object_allocation_tracepoint);
 
   if (data->klasses_table != NULL) {
     st_foreach(data->klasses_table, mark_key_for_gc_i, 0);
@@ -76,27 +80,18 @@ static void fast_cov_mark(void *ptr) {
 
 static void fast_cov_free(void *ptr) {
   struct fast_cov_data *data = ptr;
-  xfree(data->root);
-  xfree(data->ignored_path);
-  st_free_table(data->klasses_table);
+  if (data->root) xfree(data->root);
+  if (data->ignored_path) xfree(data->ignored_path);
+  if (data->klasses_table) st_free_table(data->klasses_table);
   xfree(data);
-}
-
-static void fast_cov_compact(void *ptr) {
-  struct fast_cov_data *data = ptr;
-  data->impacted_files = rb_gc_location(data->impacted_files);
-  data->th_covered = rb_gc_location(data->th_covered);
-  data->object_allocation_tracepoint =
-      rb_gc_location(data->object_allocation_tracepoint);
 }
 
 static const rb_data_type_t fast_cov_data_type = {
     .wrap_struct_name = "fast_cov",
     .function = {.dmark = fast_cov_mark,
                  .dfree = fast_cov_free,
-                 .dsize = NULL,
-                 .dcompact = fast_cov_compact},
-    .flags = RUBY_TYPED_FREE_IMMEDIATELY};
+                 .dsize = NULL},
+    .flags = 0};
 
 // ---- Allocator ----------------------------------------------------------
 
@@ -105,6 +100,14 @@ static VALUE fast_cov_allocate(VALUE klass) {
   VALUE obj = TypedData_Make_Struct(klass, struct fast_cov_data,
                                    &fast_cov_data_type, data);
 
+  // Initialize all VALUE fields to Qnil before any allocation that could
+  // trigger GC. TypedData_Make_Struct zeroes memory (via calloc), but 0 is
+  // Qfalse, not Qnil — and marking Qfalse can confuse Ruby 3.4's GC.
+  data->impacted_files = Qnil;
+  data->th_covered = Qnil;
+  data->object_allocation_tracepoint = Qnil;
+  data->klasses_table = NULL;
+
   data->impacted_files = rb_hash_new();
   data->root = NULL;
   data->root_len = 0;
@@ -112,8 +115,6 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->ignored_path_len = 0;
   data->last_filename_ptr = 0;
   data->threading_mode = multi;
-
-  data->object_allocation_tracepoint = Qnil;
   data->klasses_table = st_init_numtable();
 
   return obj;

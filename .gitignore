@@ -1,6 +1,7 @@
 # Compiled extensions (version-tagged)
 lib/fast_cov/*.bundle
 lib/fast_cov/*.so
+lib/fast_cov/.source_digest.*
 ext/fast_cov/*.o
 ext/fast_cov/*.bundle
 ext/fast_cov/*.so
