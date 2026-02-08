@@ -6,6 +6,8 @@ ext/fast_cov/*.bundle
 ext/fast_cov/*.so
 ext/fast_cov/Makefile
 ext/fast_cov/mkmf.log
+ext/fast_cov/*.dSYM/
+ext/fast_cov/.*.time
 tmp/
 
 # Bundler
