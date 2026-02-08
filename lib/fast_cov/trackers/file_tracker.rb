@@ -5,39 +5,50 @@ module FastCov
   # via File.read and File.open.
   #
   # Register via: config.use FastCov::FileTracker
-  # Options: root (default: config.root), ignored_path (default: config.ignored_path)
+  # Options: root, ignored_path, threads (all default from config)
+  #
+  # Threading behavior (matches Coverage C extension):
+  # - threads: true  -> track file reads from ALL threads (global tracking)
+  # - threads: false -> only track file reads from the thread that called start
   class FileTracker
     def initialize(config, **options)
       @root = options.fetch(:root, config.root)
       @ignored_path = options.fetch(:ignored_path, config.ignored_path)
+      @threads = options.fetch(:threads, config.threads)
       @files = {}
+      @started_thread = nil
     end
 
     def install
-      self.class.install_file_patch
+      File.singleton_class.prepend(FilePatch)
     end
 
     def start
+      @started_thread = Thread.current unless @threads
       self.class.active = self
     end
 
     def stop
       self.class.active = nil
+      @started_thread = nil
       result = @files.dup
       @files.clear
       result
     end
 
     def record(abs_path)
+      # In single-threaded mode, only record from the thread that called start
+      return if !@threads && Thread.current != @started_thread
+
       return unless abs_path.start_with?(@root)
       return if @ignored_path && abs_path.start_with?(@ignored_path)
+
       @files[abs_path] = true
     end
 
     # -- Class-level: File patch + active tracker routing --
 
     @active = nil
-    @installed = false
 
     module FilePatch
       def read(name, *args, **kwargs, &block)
@@ -56,12 +67,6 @@ module FastCov
 
     class << self
       attr_accessor :active
-
-      def install_file_patch
-        return if @installed
-        File.singleton_class.prepend(FilePatch)
-        @installed = true
-      end
 
       def record_for_active(path)
         return unless @active
