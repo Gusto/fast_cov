@@ -20,10 +20,17 @@ module FastCov
     end
 
     def self.stale?
+      return true unless extension_exists?
+
       stored = read_digest
       return true unless stored
 
       stored != source_digest
+    end
+
+    def self.extension_exists?
+      ext_name = "fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}"
+      Dir.glob(File.join(LIB_DIR, "#{ext_name}.{bundle,so}")).any?
     end
 
     def self.source_digest
