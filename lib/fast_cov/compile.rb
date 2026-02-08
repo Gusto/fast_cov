@@ -10,7 +10,6 @@
 #   - The C source files have changed since the last compilation
 
 require_relative "compiler"
-require_relative "constant_extractor"
 
 ext_name = "fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}"
 

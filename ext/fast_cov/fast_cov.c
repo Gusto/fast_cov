@@ -506,6 +506,7 @@ void Init_fast_cov(void) {
   id_merge_bang = rb_intern("merge!");
 
   rb_require("digest/md5");
+  rb_require("fast_cov/constant_extractor");
   VALUE mDigest = rb_const_get(rb_cObject, rb_intern("Digest"));
   cDigest = rb_const_get(mDigest, rb_intern("MD5"));
   rb_gc_register_address(&cDigest);
