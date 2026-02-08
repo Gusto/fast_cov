@@ -3,7 +3,7 @@
 require "open3"
 require "fileutils"
 
-RSpec.describe "fast_cov/compile entrypoint" do
+RSpec.describe "fast_cov/dev entrypoint" do
   let(:project_root) { File.expand_path("../../..", __dir__) }
   let(:lib_dir) { File.join(project_root, "lib", "fast_cov") }
   let(:ext_name) { "fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}" }
@@ -32,7 +32,7 @@ RSpec.describe "fast_cov/compile entrypoint" do
   it "compiles from scratch when no extension exists" do
     remove_compiled_extension
 
-    output, status = run_ruby('require "fast_cov/compile"; puts FastCov::Coverage.new.class')
+    output, status = run_ruby('require "fast_cov/dev"; puts FastCov::Coverage.new.class')
 
     expect(status).to be_success, "Process failed:\n#{output}"
     expect(output).to include("[FastCov] Compiling extension")
@@ -43,18 +43,18 @@ RSpec.describe "fast_cov/compile entrypoint" do
   it "loads without recompiling when extension is up to date" do
     # Ensure compiled and digest exists
     remove_compiled_extension
-    run_ruby('require "fast_cov/compile"')
+    run_ruby('require "fast_cov/dev"')
 
-    output, status = run_ruby('require "fast_cov/compile"; puts FastCov::Coverage.new.class')
+    output, status = run_ruby('require "fast_cov/dev"; puts FastCov::Coverage.new.class')
 
     expect(status).to be_success, "Process failed:\n#{output}"
     expect(output).to include("[FastCov] Extension up to date")
     expect(output).to include("FastCov::Coverage")
   end
 
-  it "can start and stop coverage after loading via compile entrypoint" do
+  it "can start and stop coverage after loading via dev entrypoint" do
     output, status = run_ruby(<<~RUBY)
-      require "fast_cov/compile"
+      require "fast_cov/dev"
       cov = FastCov::Coverage.new(root: "#{project_root}/spec/fixtures/calculator")
       cov.start
       result = cov.stop

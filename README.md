@@ -214,7 +214,7 @@ When developing FastCov alongside a consuming project, use the compile entrypoin
 
 ```ruby
 # Gemfile
-gem "fast_cov", path: "../fast_cov", require: "fast_cov/compile"
+gem "fast_cov", path: "../fast_cov", require: "fast_cov/dev"
 ```
 
 This compiles on first use and detects source changes for recompilation.
