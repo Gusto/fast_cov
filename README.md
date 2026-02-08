@@ -125,7 +125,7 @@ config.use FastCov::CoverageTracker
 | `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
 | `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 | `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
-| `constant_references` | Boolean | `true` | Scan bytecode for constant references and resolve them to defining files. |
+| `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. |
 
 #### What it tracks
 
@@ -133,7 +133,7 @@ config.use FastCov::CoverageTracker
 
 **Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
 
-**Constant reference resolution** (`constant_references: true`) -- at stop time, compiles tracked files to bytecode via `RubyVM::InstructionSequence.compile_file`, scans for `opt_getconstant_path` instructions, and resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached with MD5 digests for invalidation.
+**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached with MD5 digests for invalidation.
 
 #### Disabling expensive features
 
@@ -143,7 +143,7 @@ For maximum speed when you only need line-level file tracking:
 config.use FastCov::CoverageTracker, allocations: false, constant_references: false
 ```
 
-This disables the NEWOBJ hook (no per-allocation overhead) and skips bytecode scanning at stop time.
+This disables the NEWOBJ hook (no per-allocation overhead) and skips AST parsing at stop time.
 
 ### FileTracker
 
@@ -200,7 +200,7 @@ Trackers start in registration order and stop in reverse order.
 
 ## Cache
 
-FastCov caches constant reference resolution results in memory so files only need bytecode compilation once per process. The cache is process-level, content-addressed (MD5 digests), and populated automatically during `stop`.
+FastCov caches constant reference resolution results in memory so files only need parsing once per process. The cache is process-level, content-addressed (MD5 digests), and populated automatically during `stop`.
 
 ```ruby
 FastCov::Cache.data      # the raw cache hash

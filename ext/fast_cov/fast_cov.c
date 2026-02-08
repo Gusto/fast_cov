@@ -16,13 +16,10 @@
 
 // threads: true = multi-threaded (global hook), false = single-threaded (per-thread hook)
 
-// Cached IDs for iseq constant resolution
-static ID id_compile_file;
-static ID id_to_a;
-static ID id_each_child;
+// Constant resolution via Ruby helper (FastCov::ConstantExtractor)
+static VALUE cConstantExtractor;
+static ID id_extract;
 static ID id_keys;
-static VALUE sym_opt_getconstant_path;
-static VALUE cInstructionSequence;
 
 // Cache infrastructure
 static VALUE fast_cov_cache_hash; // process-level cache
@@ -241,77 +238,6 @@ static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
 
 // ---- Constant reference resolution (cached) -----------------------------
 
-// Joins [:A, :B] into "A::B". Skips empty symbols (absolute path markers).
-static VALUE join_const_path(VALUE symbol_array) {
-  long len = RARRAY_LEN(symbol_array);
-  if (len == 0) return Qnil;
-
-  VALUE separator = rb_str_new_literal("::");
-  VALUE parts = rb_ary_new_capa(len);
-
-  for (long i = 0; i < len; i++) {
-    VALUE sym = rb_ary_entry(symbol_array, i);
-    if (!SYMBOL_P(sym)) continue;
-    VALUE str = rb_sym2str(sym);
-    if (RSTRING_LEN(str) == 0) continue;
-    rb_ary_push(parts, str);
-  }
-
-  if (RARRAY_LEN(parts) == 0) return Qnil;
-  return rb_ary_join(parts, separator);
-}
-
-// Collects constant name strings from an iseq into const_names array.
-static void collect_const_names_from_iseq(VALUE iseq, VALUE const_names);
-
-static VALUE collect_child_callback(RB_BLOCK_CALL_FUNC_ARGLIST(child_iseq,
-                                                               const_names)) {
-  collect_const_names_from_iseq(child_iseq, const_names);
-  return Qnil;
-}
-
-static void collect_const_names_from_iseq(VALUE iseq, VALUE const_names) {
-  VALUE iseq_array = rb_funcall(iseq, id_to_a, 0);
-  if (!RB_TYPE_P(iseq_array, T_ARRAY) || RARRAY_LEN(iseq_array) < 14) {
-    return;
-  }
-
-  VALUE instructions = rb_ary_entry(iseq_array, 13);
-  if (!RB_TYPE_P(instructions, T_ARRAY)) {
-    return;
-  }
-
-  long insn_len = RARRAY_LEN(instructions);
-  for (long i = 0; i < insn_len; i++) {
-    VALUE insn = rb_ary_entry(instructions, i);
-
-    if (!RB_TYPE_P(insn, T_ARRAY) || RARRAY_LEN(insn) < 2) {
-      continue;
-    }
-
-    VALUE opcode = rb_ary_entry(insn, 0);
-    if (opcode != sym_opt_getconstant_path) {
-      continue;
-    }
-
-    VALUE const_path_syms = rb_ary_entry(insn, 1);
-    if (!RB_TYPE_P(const_path_syms, T_ARRAY) ||
-        RARRAY_LEN(const_path_syms) == 0) {
-      continue;
-    }
-
-    VALUE const_name = join_const_path(const_path_syms);
-    if (!NIL_P(const_name)) {
-      rb_ary_push(const_names, const_name);
-    }
-  }
-
-  if (rb_respond_to(iseq, id_each_child)) {
-    rb_block_call(iseq, id_each_child, 0, NULL, collect_child_callback,
-                  const_names);
-  }
-}
-
 // Computes MD5 hexdigest of a file's contents.
 static VALUE compute_file_digest_body(VALUE filename) {
   VALUE digest_obj = rb_funcall(cDigest, id_file, 1, filename);
@@ -329,18 +255,9 @@ static VALUE compute_file_digest(VALUE filename) {
   return result;
 }
 
-// Compile file and collect constant names.
-struct compile_collect_args {
-  VALUE filename;
-};
-
-static VALUE compile_and_collect_body(VALUE raw_args) {
-  struct compile_collect_args *args = (struct compile_collect_args *)raw_args;
-  VALUE iseq =
-      rb_funcall(cInstructionSequence, id_compile_file, 1, args->filename);
-  VALUE const_names = rb_ary_new();
-  collect_const_names_from_iseq(iseq, const_names);
-  return const_names;
+// Parse file with Prism and extract constant names.
+static VALUE extract_const_names_body(VALUE filename) {
+  return rb_funcall(cConstantExtractor, id_extract, 1, filename);
 }
 
 // Returns an array of constant name strings for a file, using the cache.
@@ -369,11 +286,10 @@ static VALUE get_const_refs_for_file(VALUE filename) {
     }
   }
 
-  // Cache miss: compile and scan
-  struct compile_collect_args args = {.filename = filename};
+  // Cache miss: parse with Prism and extract constant names
   int exception_state;
   VALUE const_names =
-      rb_protect(compile_and_collect_body, (VALUE)&args, &exception_state);
+      rb_protect(extract_const_names_body, filename, &exception_state);
   if (exception_state != 0) {
     rb_set_errinfo(Qnil);
     if (!NIL_P(cached_entry)) {
@@ -582,22 +498,12 @@ static VALUE fast_cov_stop(VALUE self) {
 // ---- Init ---------------------------------------------------------------
 
 void Init_fast_cov(void) {
-  id_compile_file = rb_intern("compile_file");
-  id_to_a = rb_intern("to_a");
-  id_each_child = rb_intern("each_child");
+  id_extract = rb_intern("extract");
   id_keys = rb_intern("keys");
   id_file = rb_intern("file");
   id_hexdigest = rb_intern("hexdigest");
   id_clear = rb_intern("clear");
   id_merge_bang = rb_intern("merge!");
-
-  sym_opt_getconstant_path = ID2SYM(rb_intern("opt_getconstant_path"));
-  rb_gc_register_address(&sym_opt_getconstant_path);
-
-  VALUE mRubyVM = rb_const_get(rb_cObject, rb_intern("RubyVM"));
-  cInstructionSequence =
-      rb_const_get(mRubyVM, rb_intern("InstructionSequence"));
-  rb_gc_register_address(&cInstructionSequence);
 
   rb_require("digest/md5");
   VALUE mDigest = rb_const_get(rb_cObject, rb_intern("Digest"));
@@ -611,6 +517,12 @@ void Init_fast_cov(void) {
                rb_hash_new());
 
   VALUE mFastCov = rb_define_module("FastCov");
+
+  // FastCov::ConstantExtractor must be loaded before the C extension
+  cConstantExtractor =
+      rb_const_get(mFastCov, rb_intern("ConstantExtractor"));
+  rb_gc_register_address(&cConstantExtractor);
+
   VALUE cCoverage = rb_define_class_under(mFastCov, "Coverage", rb_cObject);
 
   rb_define_alloc_func(cCoverage, fast_cov_allocate);
