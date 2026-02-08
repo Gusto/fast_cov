@@ -4,6 +4,10 @@
 #include <ruby.h>
 #include <stdbool.h>
 
+/* ---- Cache -------------------------------------------------------------- */
+
+extern VALUE fast_cov_cache_hash;
+
 /* ---- Path filtering ----------------------------------------------------- */
 
 bool fast_cov_is_path_included(const char *path, const char *root_path,

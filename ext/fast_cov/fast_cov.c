@@ -22,7 +22,7 @@ static ID id_extract;
 static ID id_keys;
 
 // Cache infrastructure
-static VALUE fast_cov_cache_hash; // process-level cache
+VALUE fast_cov_cache_hash; // process-level cache (non-static for access from utils)
 static VALUE cDigest;             // Digest::MD5
 static ID id_file;
 static ID id_hexdigest;
@@ -372,6 +372,8 @@ static VALUE cache_clear(VALUE self) {
   rb_funcall(fast_cov_cache_hash, id_clear, 0);
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
                rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
+               rb_hash_new());
   return Qnil;
 }
 
@@ -515,6 +517,8 @@ void Init_fast_cov(void) {
   fast_cov_cache_hash = rb_hash_new();
   rb_gc_register_address(&fast_cov_cache_hash);
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
+               rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
                rb_hash_new());
 
   VALUE mFastCov = rb_define_module("FastCov");

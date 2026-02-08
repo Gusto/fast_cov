@@ -9,6 +9,7 @@ RSpec.describe FastCov::Cache do
     it "returns the in-memory cache hash" do
       expect(FastCov::Cache.data).to be_a(Hash)
       expect(FastCov::Cache.data).to have_key(:const_refs)
+      expect(FastCov::Cache.data).to have_key(:const_locations)
     end
   end
 

@@ -43,6 +43,15 @@ VALUE fast_cov_safely_get_const_source_location(VALUE const_name_str) {
 }
 
 VALUE fast_cov_resolve_const_to_file(VALUE const_name_str) {
+  // Check cache first
+  VALUE const_locations_hash =
+      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")));
+  VALUE cached = rb_hash_lookup(const_locations_hash, const_name_str);
+  if (cached != Qnil) {
+    return cached;
+  }
+
+  // Cache miss - resolve via Object.const_source_location
   VALUE source_location =
       fast_cov_safely_get_const_source_location(const_name_str);
   if (NIL_P(source_location) || !RB_TYPE_P(source_location, T_ARRAY) ||
@@ -54,6 +63,9 @@ VALUE fast_cov_resolve_const_to_file(VALUE const_name_str) {
   if (NIL_P(filename) || !RB_TYPE_P(filename, T_STRING)) {
     return Qnil;
   }
+
+  // Cache the result
+  rb_hash_aset(const_locations_hash, const_name_str, filename);
 
   return filename;
 }
