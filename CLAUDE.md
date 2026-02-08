@@ -15,6 +15,8 @@ bin/benchmark --baseline   # save benchmark results as baseline for comparison
 ITERATIONS=5000 bin/benchmark  # override iteration count
 ```
 
+**Testing locally:** Always test in both Ruby 4.0 and Ruby 3.4.
+
 ## Project structure
 
 ```
