@@ -14,7 +14,7 @@
 #define PROFILE_FRAMES_BUFFER_SIZE 1
 #define MAX_CONST_RESOLUTION_ROUNDS 10
 
-enum threading_mode { single, multi };
+// threads: true = multi-threaded (global hook), false = single-threaded (per-thread hook)
 
 // Cached IDs for iseq constant resolution
 static ID id_compile_file;
@@ -55,7 +55,9 @@ struct fast_cov_data {
 
   uintptr_t last_filename_ptr;
 
-  enum threading_mode threading_mode;
+  bool threads;
+  bool constant_references;
+  bool allocations;
   VALUE th_covered;
 
   VALUE object_allocation_tracepoint;
@@ -115,7 +117,9 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->ignored_path = NULL;
   data->ignored_path_len = 0;
   data->last_filename_ptr = 0;
-  data->threading_mode = multi;
+  data->threads = true;
+  data->constant_references = true;
+  data->allocations = true;
   data->klasses_table = st_init_numtable();
 
   return obj;
@@ -462,57 +466,36 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   rb_scan_args(argc, argv, "01", &opt);
   if (NIL_P(opt)) opt = rb_hash_new();
 
-  // Fetch the configuration singleton for defaults:
-  // FastCov.configuration
-  VALUE mFastCov_local = rb_const_get(rb_cObject, rb_intern("FastCov"));
-  VALUE config = rb_funcall(mFastCov_local, rb_intern("configuration"), 0);
-
-  // root: defaults to FastCov.configuration.root
+  // root: defaults to Dir.pwd
   VALUE rb_root = rb_hash_lookup(opt, ID2SYM(rb_intern("root")));
   if (!RTEST(rb_root)) {
-    rb_root = rb_funcall(config, rb_intern("root"), 0);
+    rb_root = rb_funcall(rb_cDir, rb_intern("pwd"), 0);
   }
 
-  // ignored_path: defaults to FastCov.configuration.ignored_path
+  // ignored_path: optional, nil if not provided
   VALUE rb_ignored_path =
       rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_path")));
-  if (!RTEST(rb_ignored_path)) {
-    rb_ignored_path = rb_funcall(config, rb_intern("ignored_path"), 0);
-  }
 
-  // threading_mode: defaults to FastCov.configuration.threading_mode
-  VALUE rb_threading_mode =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("threading_mode")));
-  if (!RTEST(rb_threading_mode)) {
-    rb_threading_mode = rb_funcall(config, rb_intern("threading_mode"), 0);
-  }
-  enum threading_mode tm;
-  if (rb_threading_mode == ID2SYM(rb_intern("multi"))) {
-    tm = multi;
-  } else if (rb_threading_mode == ID2SYM(rb_intern("single"))) {
-    tm = single;
-  } else {
-    rb_raise(rb_eArgError, "threading mode is invalid");
-  }
+  // threads: true (multi) or false (single), defaults to true
+  VALUE rb_threads = rb_hash_lookup(opt, ID2SYM(rb_intern("threads")));
+  bool threads = (rb_threads != Qfalse);
 
-  // allocation_tracing: defaults to FastCov.configuration.allocation_tracing
-  // Use NIL_P to distinguish "not provided" (Qnil) from "explicitly false" (Qfalse)
-  VALUE rb_alloc_tracing =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("allocation_tracing")));
-  if (NIL_P(rb_alloc_tracing)) {
-    rb_alloc_tracing = rb_funcall(config, rb_intern("allocation_tracing"), 0);
-  }
-  bool alloc_tracing = RTEST(rb_alloc_tracing);
-  if (alloc_tracing && tm == single) {
-    rb_raise(
-        rb_eArgError,
-        "allocation tracing is not supported in single threaded mode");
-  }
+  // constant_references: defaults to true
+  VALUE rb_const_refs =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("constant_references")));
+  bool constant_references = (rb_const_refs != Qfalse);
+
+  // allocations: defaults to true
+  VALUE rb_allocations =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("allocations")));
+  bool allocations = (rb_allocations != Qfalse);
 
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
-  data->threading_mode = tm;
+  data->threads = threads;
+  data->constant_references = constant_references;
+  data->allocations = allocations;
   data->root_len = RSTRING_LEN(rb_root);
   data->root =
       fast_cov_ruby_strndup(RSTRING_PTR(rb_root), data->root_len);
@@ -523,7 +506,7 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
                                                data->ignored_path_len);
   }
 
-  if (alloc_tracing) {
+  if (allocations) {
     data->object_allocation_tracepoint = rb_tracepoint_new(
         Qnil, RUBY_INTERNAL_EVENT_NEWOBJ, on_newobj_event, (void *)data);
   }
@@ -539,7 +522,7 @@ static VALUE fast_cov_start(VALUE self) {
     rb_raise(rb_eRuntimeError, "root is required");
   }
 
-  if (data->threading_mode == single) {
+  if (!data->threads) {
     VALUE thval = rb_thread_current();
     rb_thread_add_event_hook(thval, on_line_event, RUBY_EVENT_LINE, self);
     data->th_covered = thval;
@@ -564,7 +547,7 @@ static VALUE fast_cov_stop(VALUE self) {
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
-  if (data->threading_mode == single) {
+  if (!data->threads) {
     VALUE thval = rb_thread_current();
     if (!rb_equal(thval, data->th_covered)) {
       rb_raise(rb_eRuntimeError, "Coverage was not started by this thread");
@@ -579,10 +562,14 @@ static VALUE fast_cov_stop(VALUE self) {
     rb_tracepoint_disable(data->object_allocation_tracepoint);
   }
 
-  st_foreach(data->klasses_table, each_instantiated_klass, (st_data_t)data);
-  st_clear(data->klasses_table);
+  if (data->allocations) {
+    st_foreach(data->klasses_table, each_instantiated_klass, (st_data_t)data);
+    st_clear(data->klasses_table);
+  }
 
-  resolve_constant_references(data);
+  if (data->constant_references) {
+    resolve_constant_references(data);
+  }
 
   VALUE res = data->impacted_files;
 

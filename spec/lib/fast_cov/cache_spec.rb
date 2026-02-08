@@ -2,10 +2,7 @@
 
 RSpec.describe FastCov::Cache do
   let(:cov) do
-    FastCov::Coverage.new(
-      root: fixtures_path("calculator"),
-      threading_mode: :multi
-    )
+    FastCov::Coverage.new(root: fixtures_path("calculator"))
   end
 
   describe ".data" do

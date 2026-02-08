@@ -1,0 +1,7 @@
+name: calculator
+version: 1
+operations:
+  - add
+  - subtract
+  - multiply
+  - divide

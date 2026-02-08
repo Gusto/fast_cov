@@ -5,9 +5,6 @@ RSpec.describe FastCov::Coverage, "threading" do
   let(:root) { fixtures_path("calculator/operations") }
 
   describe "single threaded mode" do
-    let(:threading_mode) { :single }
-    let(:allocation_tracing) { false }
-
     it "isolates coverage to each thread independently" do
       t1_queue = Thread::Queue.new
       t2_queue = Thread::Queue.new
@@ -15,8 +12,7 @@ RSpec.describe FastCov::Coverage, "threading" do
       t1 = Thread.new do
         cov = described_class.new(
           root: root,
-          threading_mode: :single,
-          allocation_tracing: false
+          threads: false
         )
         cov.start
 
@@ -40,8 +36,7 @@ RSpec.describe FastCov::Coverage, "threading" do
       t2 = Thread.new do
         cov = described_class.new(
           root: root,
-          threading_mode: :single,
-          allocation_tracing: false
+          threads: false
         )
         cov.start
 
@@ -65,8 +60,6 @@ RSpec.describe FastCov::Coverage, "threading" do
   end
 
   describe "multi threaded mode" do
-    let(:threading_mode) { :multi }
-
     it "collects coverage from background threads" do
       subject.start
 
@@ -96,7 +89,7 @@ RSpec.describe FastCov::Coverage, "threading" do
         end
       end
 
-      cov = described_class.new(root: root, threading_mode: :multi)
+      cov = described_class.new(root: root)
       cov.start
 
       jobs_queue << -> { expect(calculator.add(1, 2)).to eq(3) }
