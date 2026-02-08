@@ -263,7 +263,7 @@ static VALUE extract_const_names_body(VALUE filename) {
 // Returns an array of constant name strings for a file, using the cache.
 static VALUE get_const_refs_for_file(VALUE filename) {
   VALUE const_refs_hash =
-      rb_hash_lookup(fast_cov_cache_hash, rb_str_new_literal("const_refs"));
+      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")));
 
   VALUE cached_entry = rb_hash_lookup(const_refs_hash, filename);
 
@@ -278,11 +278,11 @@ static VALUE get_const_refs_for_file(VALUE filename) {
   // Cache hit: digest matches
   if (!NIL_P(cached_entry) && RB_TYPE_P(cached_entry, T_HASH)) {
     VALUE cached_digest =
-        rb_hash_lookup(cached_entry, rb_str_new_literal("digest"));
+        rb_hash_lookup(cached_entry, ID2SYM(rb_intern("digest")));
 
     if (!NIL_P(cached_digest) &&
         rb_str_equal(cached_digest, current_digest) == Qtrue) {
-      return rb_hash_lookup(cached_entry, rb_str_new_literal("refs"));
+      return rb_hash_lookup(cached_entry, ID2SYM(rb_intern("refs")));
     }
   }
 
@@ -300,8 +300,8 @@ static VALUE get_const_refs_for_file(VALUE filename) {
 
   // Store in cache
   VALUE new_entry = rb_hash_new();
-  rb_hash_aset(new_entry, rb_str_new_literal("digest"), current_digest);
-  rb_hash_aset(new_entry, rb_str_new_literal("refs"), const_names);
+  rb_hash_aset(new_entry, ID2SYM(rb_intern("digest")), current_digest);
+  rb_hash_aset(new_entry, ID2SYM(rb_intern("refs")), const_names);
   rb_hash_aset(const_refs_hash, filename, new_entry);
 
   return const_names;
@@ -370,7 +370,7 @@ static VALUE cache_set_data(VALUE self, VALUE new_cache) {
 
 static VALUE cache_clear(VALUE self) {
   rb_funcall(fast_cov_cache_hash, id_clear, 0);
-  rb_hash_aset(fast_cov_cache_hash, rb_str_new_literal("const_refs"),
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
                rb_hash_new());
   return Qnil;
 }
@@ -514,7 +514,7 @@ void Init_fast_cov(void) {
   // Initialize process-level cache
   fast_cov_cache_hash = rb_hash_new();
   rb_gc_register_address(&fast_cov_cache_hash);
-  rb_hash_aset(fast_cov_cache_hash, rb_str_new_literal("const_refs"),
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
                rb_hash_new());
 
   VALUE mFastCov = rb_define_module("FastCov");

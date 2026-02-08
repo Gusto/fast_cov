@@ -27,9 +27,8 @@ task :clean do
   FileUtils.rm_rf(File.expand_path("tmp", __dir__))
 end
 
-RSpec::Core::RakeTask.new(:spec) do |t|
-  t.rspec_opts = "--fail-fast"
+desc "Run specs (in subprocess to avoid Ruby 3.4 extension loading issues)"
+task spec: :compile do
+  sh "bundle", "exec", "rspec", "--fail-fast"
 end
-
-task spec: :compile
 task default: :spec
