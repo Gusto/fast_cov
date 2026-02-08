@@ -127,4 +127,31 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     coverage = subject.stop
     expect(coverage.keys).to include(fixtures_path("calculator/operations/add.rb"))
   end
+
+  describe "block form" do
+    it "returns the coverage hash instead of self" do
+      result = subject.start do
+        calculator.add(1, 2)
+        calculator.subtract(3, 1)
+      end
+
+      expect(result).to be_a(Hash)
+      expect(result.keys).to include(
+        fixtures_path("calculator/operations/add.rb"),
+        fixtures_path("calculator/operations/subtract.rb")
+      )
+    end
+
+    it "stops tracking after the block completes" do
+      subject.start { calculator.add(1, 2) }
+
+      # Coverage is already stopped — a new start/stop should not include add.rb
+      subject.start
+      calculator.multiply(2, 3)
+      result = subject.stop
+
+      expect(result.keys).to include(fixtures_path("calculator/operations/multiply.rb"))
+      expect(result.keys).not_to include(fixtures_path("calculator/operations/add.rb"))
+    end
+  end
 end

@@ -34,6 +34,7 @@ static ID id_merge_bang;
 
 // Forward declarations
 static void on_newobj_event(VALUE tracepoint_data, void *data);
+static VALUE fast_cov_stop(VALUE self);
 
 static int mark_key_for_gc_i(st_data_t key, st_data_t _value,
                               st_data_t _data) {
@@ -548,6 +549,12 @@ static VALUE fast_cov_start(VALUE self) {
 
   if (data->object_allocation_tracepoint != Qnil) {
     rb_tracepoint_enable(data->object_allocation_tracepoint);
+  }
+
+  // Block form: start { ... } runs the block then returns stop result
+  if (rb_block_given_p()) {
+    rb_yield(Qnil);
+    return fast_cov_stop(self);
   }
 
   return self;
