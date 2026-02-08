@@ -52,6 +52,22 @@ RSpec.describe "fast_cov/dev entrypoint" do
     expect(output).to include("FastCov::Coverage")
   end
 
+  it "recompiles when extension is missing but digest exists" do
+    # Simulate: digest left behind after bundle was cleaned (e.g., different Ruby version)
+    remove_compiled_extension
+    run_ruby('require "fast_cov/dev"')
+
+    # Remove only the bundle, leave the digest
+    Dir.glob(bundle_glob).each { |f| FileUtils.rm_f(f) }
+
+    output, status = run_ruby('require "fast_cov/dev"; puts FastCov::Coverage.new.class')
+
+    expect(status).to be_success, "Process failed:\n#{output}"
+    expect(output).to include("[FastCov] Compiling extension")
+    expect(output).to include("[FastCov] Compilation complete.")
+    expect(output).to include("FastCov::Coverage")
+  end
+
   it "can start and stop coverage after loading via dev entrypoint" do
     output, status = run_ruby(<<~RUBY)
       require "fast_cov/dev"
