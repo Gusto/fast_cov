@@ -4,19 +4,10 @@ A high-performance native C extension for tracking which Ruby source files are e
 
 FastCov hooks directly into the Ruby VM's event system, avoiding the overhead of Ruby's built-in `Coverage` module. The result is file-level coverage tracking with minimal performance impact.
 
-## Features
-
-- **Line event tracking** -- hooks into `RUBY_EVENT_LINE` to record which files execute, with pointer caching to skip redundant checks
-- **Allocation tracing** -- tracks object instantiation via `RUBY_INTERNAL_EVENT_NEWOBJ` and resolves class hierarchies to their source files
-- **Constant reference resolution** -- scans bytecode for constant references (`opt_getconstant_path` instructions) and traces them to their defining files, transitively
-- **Path filtering** -- only tracks files under a configurable root, with an optional ignored path for excluding vendored dependencies
-- **Threading modes** -- single-threaded (per-thread isolation) or multi-threaded (global, tracks all threads)
-- **In-memory cache** -- caches constant resolution results with MD5-based invalidation, shared across all Coverage instances within a process
-
 ## Requirements
 
 - Ruby >= 3.4.0 (MRI only)
-- macOS or Linux (not supported on Windows)
+- macOS or Linux
 
 ## Installation
 
@@ -34,153 +25,199 @@ bundle install
 
 The C extension compiles automatically during gem installation.
 
-## Usage
-
-### Basic usage
+## Quick start
 
 ```ruby
 require "fast_cov"
 
-cov = FastCov::Coverage.new(
-  root: File.expand_path("app"),
-  threading_mode: :multi
-)
+FastCov.configure do |config|
+  config.root = File.expand_path("app")
+  config.use FastCov::CoverageTracker
+  config.use FastCov::FileTracker
+end
 
-cov.start
+result = FastCov.start do
+  # ... run a test ...
+end
 
-# ... run a test ...
-
-result = cov.stop
-# => { "/path/to/app/models/user.rb" => true, "/path/to/app/services/signup.rb" => true, ... }
+# => { "/path/to/app/models/user.rb" => true, "/path/to/app/config.yml" => true, ... }
 ```
 
-`stop` returns a hash where each key is the absolute path of a source file that was executed (or referenced via constants) during the coverage window.
+`stop` returns a hash where each key is the absolute path of a file that was touched during the coverage window.
 
-### Constructor options
+## Configuration
+
+Call `FastCov.configure` before using `start`/`stop`. The block yields a `Configuration` object:
+
+```ruby
+FastCov.configure do |config|
+  config.root = Rails.root.to_s
+  config.ignored_path = Rails.root.join("vendor").to_s
+  config.threads = true
+
+  config.use FastCov::CoverageTracker
+  config.use FastCov::FileTracker
+end
+```
+
+### Config options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `root` | String | *required* | Absolute path to the project root. Only files under this path are tracked. |
-| `ignored_path` | String | `nil` | Path prefix to exclude (e.g., your bundle path if gems are installed in-project). |
-| `threading_mode` | Symbol | `:multi` | `:multi` tracks all threads. `:single` tracks only the thread that called `start`. |
-| `allocation_tracing` | Boolean | `false` | When `true`, tracks object allocations and resolves their class definitions to source files. Requires `:multi` threading mode. |
+| `root` | String | `Dir.pwd` | Absolute path to the project root. Only files under this path are tracked. |
+| `ignored_path` | String | `nil` | Path prefix to exclude (e.g., vendor/bundle). |
+| `threads` | Boolean | `true` | `true` tracks all threads. `false` tracks only the thread that called `start`. |
 
-### Start/stop lifecycle
+### Registering trackers
+
+Trackers are registered with `config.use`. Each tracker receives the config object and any options you pass:
 
 ```ruby
-cov.start    # Begin tracking. Returns self.
-result = cov.stop   # Stop tracking, return results, reset internal state.
+config.use FastCov::CoverageTracker
+config.use FastCov::CoverageTracker, constant_references: false
+config.use FastCov::FileTracker, ignored_path: "/custom/ignore"
 ```
 
-Coverage data is cleared on each `stop`, so you can reuse the same instance across tests:
+## Singleton API
 
 ```ruby
-cov.start
-run_test_a
-files_a = cov.stop
-
-cov.start
-run_test_b
-files_b = cov.stop
+FastCov.configure { |c| ... }  # Configure and install trackers
+FastCov.start                  # Start all trackers. Returns FastCov.
+FastCov.stop                   # Stop all trackers. Returns merged results hash.
+FastCov.start { ... }          # Block form: start, yield, stop. Returns results.
+FastCov.configured?            # true after configure, false after reset.
+FastCov.reset                  # Clear configuration and trackers.
 ```
 
-Calling `start` multiple times is safe (idempotent). Calling `stop` when already stopped returns an empty hash.
-
-### Allocation tracing
-
-Line events only fire when code in a file executes. Classes that have no methods called during a test (e.g., empty model classes, structs) won't be detected by line events alone. Allocation tracing fills this gap:
+### RSpec integration
 
 ```ruby
-cov = FastCov::Coverage.new(
-  root: "/path/to/project",
-  threading_mode: :multi,
-  allocation_tracing: true
-)
-
-cov.start
-User.new("alice", "alice@example.com")  # User is a Struct defined in app/models/user.rb
-result = cov.stop
-# result includes "app/models/user.rb" even though no method body executed
-```
-
-When an object is allocated, FastCov records its class, then at `stop` time resolves the class and its entire ancestor chain to their source files via `Object.const_source_location`.
-
-### Constant reference resolution
-
-If a file references a constant defined in another file (e.g., `Config::DEFAULTS`), FastCov detects this by scanning the bytecode of each tracked file for `opt_getconstant_path` instructions. The constant's defining file is then added to the coverage results.
-
-This resolution is transitive -- if file A references a constant in file B, and file B references a constant in file C, all three files appear in the results (up to 10 resolution rounds).
-
-```ruby
-# config/defaults.rb
-module Config
-  DEFAULTS = { timeout: 30 }.freeze
+# spec/support/fast_cov.rb
+FastCov.configure do |config|
+  config.root = Rails.root.to_s
+  config.use FastCov::CoverageTracker
+  config.use FastCov::FileTracker
 end
 
-# app/services/client.rb
-class Client
-  def timeout
-    Config::DEFAULTS[:timeout]
+RSpec.configure do |config|
+  config.around(:each) do |example|
+    result = FastCov.start { example.run }
+    # result is a hash of impacted file paths
   end
 end
 ```
 
-When `Client#timeout` executes during coverage, both `app/services/client.rb` and `config/defaults.rb` appear in the results.
+## Trackers
 
-### Threading modes
+### CoverageTracker
 
-**Multi-threaded (default):** Tracks execution across all threads. Use this for most applications, especially Rails apps with background threads.
+Wraps the native C extension. Handles line event tracking, allocation tracing, and constant reference resolution.
 
 ```ruby
-cov = FastCov::Coverage.new(root: root, threading_mode: :multi)
-cov.start
-
-Thread.new { run_background_work }.join  # tracked
-
-result = cov.stop  # includes files from the background thread
+config.use FastCov::CoverageTracker
 ```
 
-**Single-threaded:** Each thread gets isolated coverage. Useful for test frameworks that run tests in parallel threads.
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `root` | String | `config.root` | Override the root path for this tracker. |
+| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
+| `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
+| `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
+| `constant_references` | Boolean | `true` | Scan bytecode for constant references and resolve them to defining files. |
+
+#### What it tracks
+
+**Line events** -- hooks `RUBY_EVENT_LINE` to record which files execute. Uses pointer caching (`rb_sourcefile()` returns stable pointers) to skip redundant file checks with a single integer comparison.
+
+**Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
+
+**Constant reference resolution** (`constant_references: true`) -- at stop time, compiles tracked files to bytecode via `RubyVM::InstructionSequence.compile_file`, scans for `opt_getconstant_path` instructions, and resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached with MD5 digests for invalidation.
+
+#### Disabling expensive features
+
+For maximum speed when you only need line-level file tracking:
 
 ```ruby
-cov = FastCov::Coverage.new(
-  root: root,
-  threading_mode: :single,
-  allocation_tracing: false  # required: allocation tracing not supported in single mode
-)
-
-cov.start
-# only tracks the current thread
-result = cov.stop
+config.use FastCov::CoverageTracker, allocations: false, constant_references: false
 ```
 
-## Configuration
+This disables the NEWOBJ hook (no per-allocation overhead) and skips bytecode scanning at stop time.
+
+### FileTracker
+
+Tracks files read from disk during coverage -- JSON, YAML, ERB templates, or any file accessed via `File.read` or `File.open`.
 
 ```ruby
+config.use FastCov::FileTracker
+```
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `root` | String | `config.root` | Override the root path for this tracker. |
+| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
+
+#### How it works
+
+Prepends a module on `File.singleton_class` to intercept `File.read` and `File.open` (read-mode only). When a file within the root is read during coverage, its path is recorded. Write operations (`"w"`, `"a"`, etc.) are ignored.
+
+This catches `YAML.load_file`, `JSON.parse(File.read(...))`, `CSV.read`, ERB template loading, and any other pattern that goes through `File.read` or `File.open`.
+
+### Writing custom trackers
+
+Any object that responds to `start` and `stop` can be a tracker. `install` is called once during `configure` (optional). `stop` must return a hash of `{ path => true }`.
+
+```ruby
+class MyTracker
+  def initialize(config, **options)
+    # config is the FastCov::Configuration object
+    # options are whatever was passed to config.use
+  end
+
+  def install
+    # optional: one-time setup (called during configure)
+  end
+
+  def start
+    # called on FastCov.start
+  end
+
+  def stop
+    # called on FastCov.stop, must return { "/path/to/file" => true, ... }
+    {}
+  end
+end
+
 FastCov.configure do |config|
-  # Configuration options will be added here as features grow.
+  config.use MyTracker, some_option: "value"
 end
 ```
 
-Reset to defaults:
-
-```ruby
-FastCov.configuration.reset
-```
+Trackers start in registration order and stop in reverse order.
 
 ## Cache
 
-FastCov caches the results of constant reference resolution (bytecode scanning) in memory so that files only need to be compiled and analyzed once per process. The cache is:
-
-- **Process-level** -- shared across all `FastCov::Coverage` instances
-- **Content-addressed** -- entries are invalidated when the file's MD5 digest changes
-- **Automatic** -- populated transparently during `stop`, no setup needed
+FastCov caches constant reference resolution results in memory so files only need bytecode compilation once per process. The cache is process-level, content-addressed (MD5 digests), and populated automatically during `stop`.
 
 ```ruby
 FastCov::Cache.data      # the raw cache hash
-FastCov::Cache.clear     # empties the in-memory cache
-FastCov::Cache.data = {} # replace cache contents (advanced use)
+FastCov::Cache.clear     # empty the cache
+FastCov::Cache.data = {} # replace cache contents
 ```
+
+## Local development with path: gems
+
+When developing FastCov alongside a consuming project, use the compile entrypoint to auto-compile the C extension:
+
+```ruby
+# Gemfile
+gem "fast_cov", path: "../fast_cov", require: "fast_cov/compile"
+```
+
+This compiles on first use and detects source changes for recompilation.
 
 ## Development
 
@@ -194,80 +231,13 @@ bundle exec rake spec     # run tests (compiles first)
 
 ### Benchmarking
 
-FastCov includes a benchmarking suite for catching performance regressions. The workflow is: save a baseline before your change, develop, then compare against the baseline when you're done.
-
 ```sh
-# 1. Before making changes, save the current performance as baseline
-bin/benchmark --baseline
-
-# 2. Make your changes...
-
-# 3. Compare against the baseline
-bin/benchmark
+bin/benchmark --baseline   # save current performance as baseline
+# ... make changes ...
+bin/benchmark              # compare against baseline
 ```
 
-The output shows the average time per iteration, iterations per second, and the % change vs the baseline for each scenario:
-
-```
-FastCov Benchmark Suite
-Ruby 4.0.0, arm64-darwin24
-1000 iterations x 7 samples (median)
-========================================================================
-
-                                           avg (ms)          ips    vs baseline
--------------------------------------------------------------------------------
-  Line coverage (small)                       0.216       4631.4         -2.7%
-  Line coverage (many files)                  0.316       3163.9         -3.9%
-  Allocation tracing                          0.208       4813.4         -7.1%
-  Constant resolution (cold cache)            1.051        951.2         -1.8%
-  Constant resolution (warm cache)            0.353       2833.0         -3.3%
-  Rapid start/stop (100x)                    20.303         49.3         -1.3%
-  Multi-threaded coverage                     0.236       4241.8         -3.9%
-```
-
-Negative percentages mean faster. Each scenario runs 1000 iterations across 7 samples and reports the median to filter outliers. Override iteration count with `ITERATIONS=5000 bin/benchmark`.
-
-You can re-save the baseline at any time with `bin/benchmark --baseline`.
-
-### Project structure
-
-```
-fast_cov/
-├── ext/fast_cov/
-│   ├── fast_cov.c           # Core C extension (~610 lines)
-│   ├── fast_cov_utils.c     # Path filtering, string utils, constant resolution
-│   ├── fast_cov.h           # Shared declarations
-│   └── extconf.rb           # Build configuration
-├── lib/
-│   ├── fast_cov.rb           # Entry point
-│   └── fast_cov/
-│       ├── version.rb        # Version constant
-│       ├── configuration.rb  # FastCov.configure
-│       ├── cache.rb          # In-memory cache
-│       └── benchmark/
-│           ├── runner.rb     # Measurement harness + baseline comparison
-│           └── scenarios.rb  # Benchmark scenario definitions
-├── spec/
-│   ├── lib/fast_cov/         # Tests organized by feature
-│   │   ├── coverage/
-│   │   │   ├── initialization_spec.rb
-│   │   │   ├── path_filtering_spec.rb
-│   │   │   ├── line_coverage_spec.rb
-│   │   │   ├── threading_spec.rb
-│   │   │   ├── allocation_tracing_spec.rb
-│   │   │   ├── caching_spec.rb
-│   │   │   └── robustness_spec.rb
-│   │   ├── cache_spec.rb
-│   │   └── configuration_spec.rb
-│   └── fixtures/             # Calculator and app model fixtures
-├── bin/
-│   ├── benchmark             # Performance benchmarks with baseline comparison
-│   ├── console               # IRB with FastCov loaded
-│   └── rspec                 # RSpec binstub
-├── Gemfile
-├── Rakefile
-└── fast_cov.gemspec
-```
+Override iteration count: `ITERATIONS=5000 bin/benchmark`
 
 ## License
 
