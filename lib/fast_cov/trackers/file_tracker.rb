@@ -15,7 +15,7 @@ module FastCov
       @root = options.fetch(:root, config.root)
       @ignored_path = options.fetch(:ignored_path, config.ignored_path)
       @threads = options.fetch(:threads, config.threads)
-      @files = {}
+      @files = nil
       @started_thread = nil
     end
 
@@ -24,6 +24,7 @@ module FastCov
     end
 
     def start
+      @files = {}
       @started_thread = Thread.current unless @threads
       self.class.active = self
     end
@@ -31,15 +32,14 @@ module FastCov
     def stop
       self.class.active = nil
       @started_thread = nil
-      result = @files.dup
-      @files.clear
+      result = @files
+      @files = nil
       result
     end
 
     def record(abs_path)
       # In single-threaded mode, only record from the thread that called start
       return if !@threads && Thread.current != @started_thread
-
       return unless abs_path.start_with?(@root)
       return if @ignored_path && abs_path.start_with?(@ignored_path)
 
