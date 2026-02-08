@@ -5,6 +5,7 @@ require_relative "fast_cov/fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}"
 require_relative "fast_cov/configuration"
 require_relative "fast_cov/trackers/coverage_tracker"
 require_relative "fast_cov/trackers/file_tracker"
+require_relative "fast_cov/trackers/factory_bot_tracker"
 
 module FastCov
   class << self
