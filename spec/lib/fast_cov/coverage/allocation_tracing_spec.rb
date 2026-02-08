@@ -5,7 +5,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
   let(:root) { fixtures_path("app") }
 
   context "when enabled" do
-    let(:use_allocation_tracing) { true }
+    let(:allocation_tracing) { true }
 
     it "tracks coverage for a model and its full ancestor chain" do
       subject.start
@@ -105,7 +105,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
   end
 
   context "when disabled" do
-    let(:use_allocation_tracing) { false }
+    let(:allocation_tracing) { false }
 
     it "does not track coverage for object allocations" do
       subject.start

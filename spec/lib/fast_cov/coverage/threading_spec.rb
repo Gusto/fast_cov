@@ -6,7 +6,7 @@ RSpec.describe FastCov::Coverage, "threading" do
 
   describe "single threaded mode" do
     let(:threading_mode) { :single }
-    let(:use_allocation_tracing) { false }
+    let(:allocation_tracing) { false }
 
     it "isolates coverage to each thread independently" do
       t1_queue = Thread::Queue.new
@@ -16,7 +16,7 @@ RSpec.describe FastCov::Coverage, "threading" do
         cov = described_class.new(
           root: root,
           threading_mode: :single,
-          use_allocation_tracing: false
+          allocation_tracing: false
         )
         cov.start
 
@@ -41,7 +41,7 @@ RSpec.describe FastCov::Coverage, "threading" do
         cov = described_class.new(
           root: root,
           threading_mode: :single,
-          use_allocation_tracing: false
+          allocation_tracing: false
         )
         cov.start
 

@@ -457,18 +457,33 @@ static VALUE cache_clear(VALUE self) {
 
 static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   VALUE opt;
-  rb_scan_args(argc, argv, "10", &opt);
+  rb_scan_args(argc, argv, "01", &opt);
+  if (NIL_P(opt)) opt = rb_hash_new();
 
+  // Fetch the configuration singleton for defaults:
+  // FastCov.configuration
+  VALUE mFastCov_local = rb_const_get(rb_cObject, rb_intern("FastCov"));
+  VALUE config = rb_funcall(mFastCov_local, rb_intern("configuration"), 0);
+
+  // root: defaults to FastCov.configuration.root
   VALUE rb_root = rb_hash_lookup(opt, ID2SYM(rb_intern("root")));
   if (!RTEST(rb_root)) {
-    rb_raise(rb_eArgError, "root is required");
+    rb_root = rb_funcall(config, rb_intern("root"), 0);
   }
 
+  // ignored_path: defaults to FastCov.configuration.ignored_path
   VALUE rb_ignored_path =
       rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_path")));
+  if (!RTEST(rb_ignored_path)) {
+    rb_ignored_path = rb_funcall(config, rb_intern("ignored_path"), 0);
+  }
 
+  // threading_mode: defaults to FastCov.configuration.threading_mode
   VALUE rb_threading_mode =
       rb_hash_lookup(opt, ID2SYM(rb_intern("threading_mode")));
+  if (!RTEST(rb_threading_mode)) {
+    rb_threading_mode = rb_funcall(config, rb_intern("threading_mode"), 0);
+  }
   enum threading_mode tm;
   if (rb_threading_mode == ID2SYM(rb_intern("multi"))) {
     tm = multi;
@@ -478,9 +493,15 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
     rb_raise(rb_eArgError, "threading mode is invalid");
   }
 
+  // allocation_tracing: defaults to FastCov.configuration.allocation_tracing
+  // Use NIL_P to distinguish "not provided" (Qnil) from "explicitly false" (Qfalse)
   VALUE rb_alloc_tracing =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("use_allocation_tracing")));
-  if (rb_alloc_tracing == Qtrue && tm == single) {
+      rb_hash_lookup(opt, ID2SYM(rb_intern("allocation_tracing")));
+  if (NIL_P(rb_alloc_tracing)) {
+    rb_alloc_tracing = rb_funcall(config, rb_intern("allocation_tracing"), 0);
+  }
+  bool alloc_tracing = RTEST(rb_alloc_tracing);
+  if (alloc_tracing && tm == single) {
     rb_raise(
         rb_eArgError,
         "allocation tracing is not supported in single threaded mode");
@@ -500,7 +521,7 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
                                                data->ignored_path_len);
   }
 
-  if (rb_alloc_tracing == Qtrue) {
+  if (alloc_tracing) {
     data->object_allocation_tracepoint = rb_tracepoint_new(
         Qnil, RUBY_INTERNAL_EVENT_NEWOBJ, on_newobj_event, (void *)data);
   }

@@ -83,7 +83,7 @@ The runner takes 7 samples per scenario and reports the **median** to filter out
 ## Testing conventions
 
 - Tests are integration-level, organized by feature under `spec/lib/fast_cov/coverage/`.
-- Shared context `"coverage instance"` (in `spec/support/shared_contexts.rb`) provides a standard `subject` with configurable `root`, `ignored_path`, `threading_mode`, and `use_allocation_tracing`.
+- Shared context `"coverage instance"` (in `spec/support/shared_contexts.rb`) provides a standard `subject` with configurable `root`, `ignored_path`, `threading_mode`, and `allocation_tracing`.
 - `fixtures_path(*segments)` helper builds absolute paths to `spec/fixtures/`.
 - `FastCov::Cache.clear` runs before every test for isolation.
 - Always use `--fail-fast` when running specs.

@@ -63,7 +63,7 @@ result = cov.stop
 | `root` | String | *required* | Absolute path to the project root. Only files under this path are tracked. |
 | `ignored_path` | String | `nil` | Path prefix to exclude (e.g., your bundle path if gems are installed in-project). |
 | `threading_mode` | Symbol | `:multi` | `:multi` tracks all threads. `:single` tracks only the thread that called `start`. |
-| `use_allocation_tracing` | Boolean | `false` | When `true`, tracks object allocations and resolves their class definitions to source files. Requires `:multi` threading mode. |
+| `allocation_tracing` | Boolean | `false` | When `true`, tracks object allocations and resolves their class definitions to source files. Requires `:multi` threading mode. |
 
 ### Start/stop lifecycle
 
@@ -94,7 +94,7 @@ Line events only fire when code in a file executes. Classes that have no methods
 cov = FastCov::Coverage.new(
   root: "/path/to/project",
   threading_mode: :multi,
-  use_allocation_tracing: true
+  allocation_tracing: true
 )
 
 cov.start
@@ -146,7 +146,7 @@ result = cov.stop  # includes files from the background thread
 cov = FastCov::Coverage.new(
   root: root,
   threading_mode: :single,
-  use_allocation_tracing: false  # required: allocation tracing not supported in single mode
+  allocation_tracing: false  # required: allocation tracing not supported in single mode
 )
 
 cov.start

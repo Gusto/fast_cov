@@ -8,4 +8,5 @@ end
 
 require "mkmf"
 
-create_makefile("fast_cov/fast_cov")
+# Tag with Ruby version + platform so multiple versions coexist in lib/fast_cov/.
+create_makefile("fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}")

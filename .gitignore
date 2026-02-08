@@ -1,7 +1,11 @@
-# Compiled extension
-lib/fast_cov/fast_cov.bundle
-lib/fast_cov/fast_cov.so
-lib/fast_cov/fast_cov.o
+# Compiled extensions (version-tagged)
+lib/fast_cov/*.bundle
+lib/fast_cov/*.so
+ext/fast_cov/*.o
+ext/fast_cov/*.bundle
+ext/fast_cov/*.so
+ext/fast_cov/Makefile
+ext/fast_cov/mkmf.log
 tmp/
 
 # Bundler

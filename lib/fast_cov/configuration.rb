@@ -2,7 +2,13 @@
 
 module FastCov
   class Configuration
+    attr_accessor :root, :ignored_path, :threading_mode, :allocation_tracing
+
     def initialize
+      @root = Dir.pwd
+      @ignored_path = nil
+      @threading_mode = :multi
+      @allocation_tracing = true
     end
 
     def reset

@@ -36,7 +36,7 @@ module FastCov
           cov = FastCov::Coverage.new(
             root: root_app,
             threading_mode: :multi,
-            use_allocation_tracing: true
+            allocation_tracing: true
           )
           cov.start
           MyModel.new

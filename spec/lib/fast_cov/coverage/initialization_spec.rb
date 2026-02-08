@@ -20,7 +20,7 @@ RSpec.describe FastCov::Coverage, "initialization" do
       described_class.new(
         root: root,
         threading_mode: :single,
-        use_allocation_tracing: true
+        allocation_tracing: true
       )
     }.to raise_error(
       ArgumentError,
