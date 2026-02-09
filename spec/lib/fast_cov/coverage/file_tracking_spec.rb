@@ -21,7 +21,7 @@ RSpec.describe "FastCov file tracking" do
       File.read(fixtures_path("calculator", "config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
 
     it "tracks files read via File.open" do
@@ -29,7 +29,7 @@ RSpec.describe "FastCov file tracking" do
       File.open(fixtures_path("calculator", "config.yml"), "r") { |f| f.read }
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
 
     it "tracks YAML files loaded via YAML.safe_load_file" do
@@ -37,7 +37,7 @@ RSpec.describe "FastCov file tracking" do
       YAML.safe_load_file(fixtures_path("calculator", "config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
 
     it "tracks files read by executed Ruby code" do
@@ -45,7 +45,7 @@ RSpec.describe "FastCov file tracking" do
       ConfigReader.read_config
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
 
     it "does not track files outside the root" do
@@ -57,16 +57,13 @@ RSpec.describe "FastCov file tracking" do
     end
 
     it "does not track write operations via File.open" do
-      temp_file = File.join(fixtures_path("calculator"), "tmp_write_test.txt")
-      begin
-        FastCov.start
-        File.open(temp_file, "w") { |f| f.write("test") }
-        coverage = FastCov.stop
+      FastCov.start
+      File.open(fixtures_path("calculator", "tmp_write_test.txt"), "w") { |f| f.write("test") }
+      coverage = FastCov.stop
 
-        expect(coverage.keys).not_to include(temp_file)
-      ensure
-        FileUtils.rm_f(temp_file)
-      end
+      expect(coverage.keys).not_to include("tmp_write_test.txt")
+    ensure
+      FileUtils.rm_f(fixtures_path("calculator", "tmp_write_test.txt"))
     end
 
     it "works with block form" do
@@ -74,7 +71,7 @@ RSpec.describe "FastCov file tracking" do
         File.read(fixtures_path("calculator", "config.yml"))
       end
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
 
     it "tracks .rb files read via File.read (not just executed ones)" do
@@ -82,7 +79,7 @@ RSpec.describe "FastCov file tracking" do
       File.read(fixtures_path("calculator", "constants.rb"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "constants.rb"))
+      expect(coverage.keys).to include("constants.rb")
     end
 
     it "includes both line coverage and file reads in results" do
@@ -91,10 +88,7 @@ RSpec.describe "FastCov file tracking" do
       File.read(fixtures_path("calculator", "config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(
-        fixtures_path("calculator", "operations/add.rb"),
-        fixtures_path("calculator", "config.yml")
-      )
+      expect(coverage.keys).to include("operations/add.rb", "config.yml")
     end
   end
 
@@ -112,7 +106,7 @@ RSpec.describe "FastCov file tracking" do
       File.read(fixtures_path("calculator", "operations", "ops_config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).not_to include(fixtures_path("calculator", "operations", "ops_config.yml"))
+      expect(coverage.keys).not_to include("operations/ops_config.yml")
     end
 
     it "still tracks file reads outside the ignored path" do
@@ -120,7 +114,7 @@ RSpec.describe "FastCov file tracking" do
       File.read(fixtures_path("calculator", "config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
   end
 
@@ -137,7 +131,7 @@ RSpec.describe "FastCov file tracking" do
       File.read(fixtures_path("calculator", "config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).not_to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).not_to include("config.yml")
     end
   end
 end

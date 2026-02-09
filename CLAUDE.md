@@ -17,6 +17,8 @@ ITERATIONS=5000 bin/benchmark  # override iteration count
 
 **Testing locally:** Always test in both Ruby 4.0 and Ruby 3.4.
 
+**Before starting new changes:** Ask the user if they want to save a baseline benchmark first (`bin/benchmark --baseline`). This allows comparing performance before and after the changes.
+
 ## Project structure
 
 ```
@@ -31,6 +33,11 @@ lib/fast_cov/
   version.rb          # VERSION constant.
   configuration.rb    # FastCov.configure block API. Currently a stub for future options.
   cache.rb            # FastCov::Cache module. C defines .data, .data=, .clear.
+  trackers/
+    abstract_tracker.rb    # Base class for Ruby trackers (FileTracker, FactoryBotTracker).
+    coverage_tracker.rb    # Wraps the C extension for line/allocation/constant tracking.
+    file_tracker.rb        # Tracks File.read/File.open calls.
+    factory_bot_tracker.rb # Tracks FactoryBot factory definition files.
   benchmark/
     runner.rb          # Benchmark harness: measurement, baseline comparison, reporting.
     scenarios.rb       # The 7 benchmark scenario definitions.
@@ -64,7 +71,16 @@ Constant resolution is the expensive part (compiling iseqs). Results are cached 
 
 ### GC integration
 
-The C struct uses Ruby's TypedData API with proper `mark`, `free`, and `compact` callbacks. `rb_gc_mark_movable` is used for all VALUE fields so the GC can relocate them during compaction. The `klasses_table` (an `st_table`) stores raw VALUE pointers as keys, which are marked as non-movable during GC via `rb_gc_mark`.
+The C struct uses Ruby's TypedData API with proper `mark` and `free` callbacks. `rb_gc_mark` (non-movable, pins objects) is used for all VALUE fields — on Ruby 3.4+, `rb_gc_mark_movable` with compaction causes crashes, so we pin objects instead. The `klasses_table` (an `st_table`) stores raw VALUE pointers as keys, which are also marked via `rb_gc_mark`.
+
+**Important for C code:** When storing raw `const char*` pointers from Ruby strings, freeze the string first (`rb_str_freeze`) to prevent GC compaction from moving it. Alternatively, re-read the pointer immediately before use with no intervening Ruby calls.
+
+### Utils module
+
+`FastCov::Utils` provides C-implemented utility functions:
+
+- `path_within?(path, directory)` — Returns true if `path` is within `directory`. Correctly handles trailing slashes and sibling directories with longer names (e.g., `/a/b/c` does NOT match `/a/b/cd`).
+- `relativize_paths(hash, root)` — Mutates `hash` in place, converting absolute path keys to relative paths from `root`. Called automatically by `FastCov.stop`.
 
 ## Benchmark scenarios
 

@@ -3,6 +3,7 @@
 require_relative "fast_cov/version"
 require_relative "fast_cov/fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}"
 require_relative "fast_cov/configuration"
+require_relative "fast_cov/trackers/abstract_tracker"
 require_relative "fast_cov/trackers/coverage_tracker"
 require_relative "fast_cov/trackers/file_tracker"
 require_relative "fast_cov/trackers/factory_bot_tracker"
@@ -40,6 +41,7 @@ module FastCov
       raise "FastCov.configure must be called before stop" unless configured?
       result = {}
       @trackers.reverse_each { |t| result.merge!(t.stop) }
+      Utils.relativize_paths(result, @configuration.root)
       result
     end
 

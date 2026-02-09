@@ -33,7 +33,7 @@ RSpec.describe FastCov do
       Calculator.new.add(1, 2)
       result = FastCov.stop
 
-      expect(result.keys).to include(fixtures_path("calculator/operations/add.rb"))
+      expect(result.keys).to include("add.rb")
     end
 
     it "returns self from start" do
@@ -57,10 +57,7 @@ RSpec.describe FastCov do
       end
 
       expect(result).to be_a(Hash)
-      expect(result.keys).to include(
-        fixtures_path("calculator/operations/add.rb"),
-        fixtures_path("calculator/operations/subtract.rb")
-      )
+      expect(result.keys).to include("add.rb", "subtract.rb")
     end
   end
 
@@ -103,7 +100,7 @@ RSpec.describe FastCov do
         File.read(fixtures_path("calculator", "config.yml"))
       end
 
-      expect(coverage.keys).to include(fixtures_path("calculator", "config.yml"))
+      expect(coverage.keys).to include("config.yml")
     end
 
     it "passes options to the tracker" do
@@ -118,8 +115,8 @@ RSpec.describe FastCov do
       File.read(fixtures_path("calculator", "operations", "ops_config.yml"))
       coverage = FastCov.stop
 
-      expect(coverage.keys).not_to include(fixtures_path("calculator", "config.yml"))
-      expect(coverage.keys).to include(fixtures_path("calculator", "operations", "ops_config.yml"))
+      expect(coverage.keys).not_to include("config.yml")
+      expect(coverage.keys).to include("operations/ops_config.yml")
     end
   end
 end

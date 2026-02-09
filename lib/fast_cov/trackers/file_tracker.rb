@@ -1,54 +1,17 @@
 # frozen_string_literal: true
 
+require_relative "abstract_tracker"
+
 module FastCov
   # Tracks files read from disk during coverage (JSON, YAML, .rb templates, etc.)
   # via File.read and File.open.
   #
   # Register via: config.use FastCov::FileTracker
   # Options: root, ignored_path, threads (all default from config)
-  #
-  # Threading behavior (matches Coverage C extension):
-  # - threads: true  -> track file reads from ALL threads (global tracking)
-  # - threads: false -> only track file reads from the thread that called start
-  class FileTracker
-    def initialize(config, **options)
-      @root = options.fetch(:root, config.root)
-      @ignored_path = options.fetch(:ignored_path, config.ignored_path)
-      @threads = options.fetch(:threads, config.threads)
-      @files = nil
-      @started_thread = nil
-    end
-
+  class FileTracker < AbstractTracker
     def install
       File.singleton_class.prepend(FilePatch)
     end
-
-    def start
-      @files = {}
-      @started_thread = Thread.current unless @threads
-      self.class.active = self
-    end
-
-    def stop
-      self.class.active = nil
-      @started_thread = nil
-      result = @files
-      @files = nil
-      result
-    end
-
-    def record(abs_path)
-      # In single-threaded mode, only record from the thread that called start
-      return if !@threads && Thread.current != @started_thread
-      return unless abs_path.start_with?(@root)
-      return if @ignored_path && abs_path.start_with?(@ignored_path)
-
-      @files[abs_path] = true
-    end
-
-    # -- Class-level: File patch + active tracker routing --
-
-    @active = nil
 
     module FilePatch
       def read(name, *args, **kwargs, &block)
@@ -66,8 +29,6 @@ module FastCov
     end
 
     class << self
-      attr_accessor :active
-
       def record_for_active(path)
         return unless @active
 
@@ -81,10 +42,6 @@ module FastCov
         end
 
         @active.record(abs_path)
-      end
-
-      def reset
-        @active = nil
       end
     end
   end

@@ -10,6 +10,9 @@ extern VALUE fast_cov_cache_hash;
 
 /* ---- Path filtering ----------------------------------------------------- */
 
+bool fast_cov_is_within_root(const char *path, long path_len,
+                             const char *root, long root_len);
+
 bool fast_cov_is_path_included(const char *path, const char *root_path,
                                long root_path_len, const char *ignored_path,
                                long ignored_path_len);

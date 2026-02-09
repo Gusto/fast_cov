@@ -355,6 +355,82 @@ static void resolve_constant_references(struct fast_cov_data *data) {
   }
 }
 
+// ---- Utils module methods (FastCov::Utils) ------------------------------
+
+// Utils.path_within?(path, directory) -> true/false
+// Check if path is within directory, correctly handling:
+// - Trailing slashes on directory
+// - Sibling directories with longer names (e.g., /a/b/c vs /a/b/cd)
+static VALUE utils_path_within(VALUE self, VALUE path, VALUE directory) {
+  Check_Type(path, T_STRING);
+  Check_Type(directory, T_STRING);
+
+  // Freeze strings to prevent GC compaction from moving them
+  rb_str_freeze(path);
+  rb_str_freeze(directory);
+
+  bool result = fast_cov_is_within_root(
+      RSTRING_PTR(path), RSTRING_LEN(path),
+      RSTRING_PTR(directory), RSTRING_LEN(directory));
+
+  return result ? Qtrue : Qfalse;
+}
+
+// Utils.relativize_paths(hash, root) -> hash
+// Mutates hash in place: converts absolute path keys to relative paths from root.
+// Paths not within root are left unchanged.
+static VALUE utils_relativize_paths(VALUE self, VALUE hash, VALUE root) {
+  Check_Type(hash, T_HASH);
+  Check_Type(root, T_STRING);
+
+  // Freeze root to prevent GC from moving it during compaction
+  rb_str_freeze(root);
+
+  const char *root_ptr = RSTRING_PTR(root);
+  long root_len = RSTRING_LEN(root);
+
+  // Normalize: strip trailing slash for offset calculation
+  long effective_root_len = root_len;
+  if (effective_root_len > 0 && root_ptr[effective_root_len - 1] == '/') {
+    effective_root_len--;
+  }
+
+  // Collect keys to transform (can't modify hash while iterating)
+  VALUE keys = rb_funcall(hash, id_keys, 0);
+  long num_keys = RARRAY_LEN(keys);
+
+  for (long i = 0; i < num_keys; i++) {
+    VALUE abs_path = rb_ary_entry(keys, i);
+    if (!RB_TYPE_P(abs_path, T_STRING)) continue;
+
+    // Freeze to prevent GC moving it
+    rb_str_freeze(abs_path);
+
+    const char *path_ptr = RSTRING_PTR(abs_path);
+    long path_len = RSTRING_LEN(abs_path);
+
+    // Use proper within_root check
+    if (!fast_cov_is_within_root(path_ptr, path_len, root_ptr, root_len)) {
+      continue;
+    }
+
+    // Calculate offset (skip root + separator)
+    long offset = effective_root_len;
+    if (offset < path_len && path_ptr[offset] == '/') offset++;
+
+    // Create relative path
+    VALUE rel_path = rb_str_substr(abs_path, offset, path_len - offset);
+
+    // Get value, delete old key, insert new key
+    VALUE value = rb_hash_aref(hash, abs_path);
+    rb_hash_delete(hash, abs_path);
+    rb_hash_aset(hash, rel_path, value);
+  }
+
+  RB_GC_GUARD(keys);
+  return hash;
+}
+
 // ---- Cache module methods (FastCov::Cache) ------------------------------
 
 static VALUE cache_get_data(VALUE self) { return fast_cov_cache_hash; }
@@ -540,4 +616,9 @@ void Init_fast_cov(void) {
   rb_define_module_function(mCache, "data", cache_get_data, 0);
   rb_define_module_function(mCache, "data=", cache_set_data, 1);
   rb_define_module_function(mCache, "clear", cache_clear, 0);
+
+  // FastCov::Utils module (C-defined methods)
+  VALUE mUtils = rb_define_module_under(mFastCov, "Utils");
+  rb_define_module_function(mUtils, "path_within?", utils_path_within, 2);
+  rb_define_module_function(mUtils, "relativize_paths", utils_relativize_paths, 2);
 }

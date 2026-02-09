@@ -40,10 +40,10 @@ result = FastCov.start do
   # ... run a test ...
 end
 
-# => { "/path/to/app/models/user.rb" => true, "/path/to/app/config.yml" => true, ... }
+# => { "models/user.rb" => true, "config.yml" => true, ... }
 ```
 
-`stop` returns a hash where each key is the absolute path of a file that was touched during the coverage window.
+`stop` returns a hash where each key is the path (relative to `root`) of a file that was touched during the coverage window.
 
 ## Configuration
 
@@ -186,7 +186,8 @@ class MyTracker
   end
 
   def stop
-    # called on FastCov.stop, must return { "/path/to/file" => true, ... }
+    # called on FastCov.stop, must return { "path/to/file" => true, ... }
+    # paths should be absolute; FastCov will relativize them to config.root
     {}
   end
 end
