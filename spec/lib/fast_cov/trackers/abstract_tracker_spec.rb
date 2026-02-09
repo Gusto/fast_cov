@@ -173,6 +173,18 @@ RSpec.describe FastCov::AbstractTracker do
     end
   end
 
+  describe ".record (class method)" do
+    it "delegates to active instance when active" do
+      tracker.start
+      described_class.record("/app/foo.rb")
+      expect(tracker.instance_variable_get(:@files)).to have_key("/app/foo.rb")
+    end
+
+    it "safely no-ops when no active instance" do
+      expect { described_class.record("/app/foo.rb") }.not_to raise_error
+    end
+  end
+
   describe "subclass isolation" do
     let(:subclass_a) { Class.new(described_class) }
     let(:subclass_b) { Class.new(described_class) }

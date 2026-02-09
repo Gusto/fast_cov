@@ -61,6 +61,10 @@ module FastCov
     class << self
       attr_accessor :active
 
+      def record(abs_path)
+        @active&.record(abs_path)
+      end
+
       def reset
         @active = nil
       end
