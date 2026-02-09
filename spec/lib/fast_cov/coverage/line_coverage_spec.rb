@@ -9,13 +9,13 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     expect(calculator.add(1, 2)).to eq(3)
     coverage = subject.stop
     expect(coverage.size).to eq(1)
-    expect(coverage.keys).to include(fixtures_path("calculator/operations/add.rb"))
+    expect(coverage).to include(fixtures_path("calculator/operations/add.rb"))
 
     subject.start
     expect(calculator.subtract(1, 2)).to eq(-1)
     coverage = subject.stop
     expect(coverage.size).to eq(1)
-    expect(coverage.keys).to include(fixtures_path("calculator/operations/subtract.rb"))
+    expect(coverage).to include(fixtures_path("calculator/operations/subtract.rb"))
   end
 
   it "does not track coverage when stopped" do
@@ -30,7 +30,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     expect(calculator.multiply(1, 2)).to eq(2)
     coverage = subject.stop
     expect(coverage.size).to eq(1)
-    expect(coverage.keys).to include(fixtures_path("calculator/operations/multiply.rb"))
+    expect(coverage).to include(fixtures_path("calculator/operations/multiply.rb"))
   end
 
   it "does not fail if start is called several times" do
@@ -48,7 +48,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     coverage = subject.stop
     expect(coverage.size).to eq(1)
 
-    expect(subject.stop).to eq({})
+    expect(subject.stop).to be_empty
   end
 
   it "tracks coverage through prepended mixins" do
@@ -57,7 +57,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     coverage = subject.stop
 
     expect(coverage.size).to eq(2)
-    expect(coverage.keys).to include(
+    expect(coverage).to include(
       fixtures_path("calculator/operations/divide.rb"),
       fixtures_path("calculator/operations/helpers/calculator_logger.rb")
     )
@@ -73,7 +73,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
 
     coverage = subject.stop
 
-    expect(coverage.keys).to include(
+    expect(coverage).to include(
       fixtures_path("calculator/operations/divide.rb"),
       fixtures_path("calculator/operations/helpers/calculator_logger.rb")
     )
@@ -89,7 +89,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     expect(calculator.add(1, 2)).to eq(3)
 
     coverage = subject.stop
-    expect(coverage.keys).to include(fixtures_path("calculator/operations/add.rb"))
+    expect(coverage).to include(fixtures_path("calculator/operations/add.rb"))
   end
 
   context "with root scoped to the full calculator directory" do
@@ -103,7 +103,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
 
       coverage = subject.stop
 
-      expect(coverage.keys).to include(
+      expect(coverage).to include(
         fixtures_path("calculator/operations/constant_reader.rb"),
         fixtures_path("calculator/constants.rb")
       )
@@ -125,7 +125,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     expect(calculator.add(1, 2)).to eq(3)
 
     coverage = subject.stop
-    expect(coverage.keys).to include(fixtures_path("calculator/operations/add.rb"))
+    expect(coverage).to include(fixtures_path("calculator/operations/add.rb"))
   end
 
   describe "block form" do
@@ -136,7 +136,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
       end
 
       expect(result).to be_a(Hash)
-      expect(result.keys).to include(
+      expect(result).to include(
         fixtures_path("calculator/operations/add.rb"),
         fixtures_path("calculator/operations/subtract.rb")
       )
@@ -150,8 +150,8 @@ RSpec.describe FastCov::Coverage, "line coverage" do
       calculator.multiply(2, 3)
       result = subject.stop
 
-      expect(result.keys).to include(fixtures_path("calculator/operations/multiply.rb"))
-      expect(result.keys).not_to include(fixtures_path("calculator/operations/add.rb"))
+      expect(result).to include(fixtures_path("calculator/operations/multiply.rb"))
+      expect(result).not_to include(fixtures_path("calculator/operations/add.rb"))
     end
   end
 end

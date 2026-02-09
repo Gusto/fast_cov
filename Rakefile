@@ -4,7 +4,7 @@ require "rspec/core/rake_task"
 require "fileutils"
 
 desc "Compile the C extension for the current Ruby version"
-task :compile do
+task compile: :clean do
   ext_dir = File.expand_path("ext/fast_cov", __dir__)
   lib_dir = File.expand_path("lib/fast_cov", __dir__)
 
@@ -24,7 +24,6 @@ task :clean do
   FileUtils.rm_f(Dir.glob(File.join(ext_dir, "*.{o,bundle,so}")))
   FileUtils.rm_f(File.join(ext_dir, "Makefile"))
   FileUtils.rm_f(File.join(ext_dir, "mkmf.log"))
-  FileUtils.rm_rf(File.expand_path("tmp", __dir__))
 end
 
 desc "Run specs (in subprocess to avoid Ruby 3.4 extension loading issues)"

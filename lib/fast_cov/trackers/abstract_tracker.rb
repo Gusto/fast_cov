@@ -26,7 +26,7 @@ module FastCov
     # Public API - called by FastCov framework
 
     def start
-      @files = {}
+      @files = Set.new
       @started_thread = Thread.current unless @threads
       self.class.active = self
       on_start
@@ -45,7 +45,7 @@ module FastCov
       return if !@threads && Thread.current != @started_thread
       return unless abs_path.start_with?(@root)
       return if @ignored_path && abs_path.start_with?(@ignored_path)
-      @files[abs_path] = true if on_record(abs_path)
+      @files.add(abs_path) if on_record(abs_path)
     end
 
     # Hooks for descendants - override as needed

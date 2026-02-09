@@ -27,7 +27,7 @@ RSpec.describe FastCov::Coverage, "threading" do
 
         coverage = cov.stop
         expect(coverage.size).to eq(2)
-        expect(coverage.keys).to include(
+        expect(coverage).to include(
           fixtures_path("calculator/operations/add.rb"),
           fixtures_path("calculator/operations/multiply.rb")
         )
@@ -50,7 +50,7 @@ RSpec.describe FastCov::Coverage, "threading" do
 
         coverage = cov.stop
         expect(coverage.size).to eq(1)
-        expect(coverage.keys).to include(
+        expect(coverage).to include(
           fixtures_path("calculator/operations/subtract.rb")
         )
       end
@@ -72,7 +72,7 @@ RSpec.describe FastCov::Coverage, "threading" do
 
       coverage = subject.stop
       expect(coverage.size).to eq(2)
-      expect(coverage.keys).to include(
+      expect(coverage).to include(
         fixtures_path("calculator/operations/add.rb"),
         fixtures_path("calculator/operations/multiply.rb")
       )
@@ -100,7 +100,7 @@ RSpec.describe FastCov::Coverage, "threading" do
 
       coverage = cov.stop
       expect(coverage.size).to eq(2)
-      expect(coverage.keys).to include(
+      expect(coverage).to include(
         fixtures_path("calculator/operations/add.rb"),
         fixtures_path("calculator/operations/multiply.rb")
       )
@@ -117,7 +117,7 @@ RSpec.describe FastCov::Coverage, "threading" do
       expect(calculator.multiply(1, 2)).to eq(2)
       coverage = subject.stop
       expect(coverage.size).to eq(1)
-      expect(coverage.keys).to include(
+      expect(coverage).to include(
         fixtures_path("calculator/operations/multiply.rb")
       )
     end

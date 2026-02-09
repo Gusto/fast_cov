@@ -10,7 +10,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
     coverage = subject.stop
 
     expect(coverage.size).to eq(4)
-    expect(coverage.keys).to include(
+    expect(coverage).to include(
       fixtures_path("app/model/my_model.rb"),
       fixtures_path("app/model/my_parent_model.rb"),
       fixtures_path("app/model/my_grandparent_model.rb"),
@@ -36,7 +36,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
     coverage = subject.stop
 
     expect(coverage.size).to eq(1)
-    expect(coverage.keys).to include(fixtures_path("app/model/my_struct.rb"))
+    expect(coverage).to include(fixtures_path("app/model/my_struct.rb"))
   end
 
   context "Data structs (Ruby >= 3.2)" do
@@ -50,7 +50,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
       coverage = subject.stop
 
       expect(coverage.size).to eq(1)
-      expect(coverage.keys).to include(fixtures_path("app/model/measure.rb"))
+      expect(coverage).to include(fixtures_path("app/model/measure.rb"))
     end
   end
 
@@ -61,7 +61,7 @@ RSpec.describe FastCov::Coverage, "allocation tracing" do
     coverage = subject.stop
 
     expect(result).to eq("called any_method_name with [1, 2, 3]")
-    expect(coverage.keys).to include(fixtures_path("app/model/dynamic_model.rb"))
+    expect(coverage).to include(fixtures_path("app/model/dynamic_model.rb"))
   end
 
   context "when Object.const_source_location is stubbed" do

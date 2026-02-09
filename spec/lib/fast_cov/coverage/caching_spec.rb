@@ -13,7 +13,7 @@ RSpec.describe FastCov::Coverage, "caching" do
     ConstantReader.new.operations
     warm_result = subject.stop
 
-    expect(warm_result.keys.sort).to eq(cold_result.keys.sort)
+    expect(warm_result.to_a.sort).to eq(cold_result.to_a.sort)
   end
 
   it "resolves constants correctly even after cache is cleared between runs" do
@@ -27,10 +27,10 @@ RSpec.describe FastCov::Coverage, "caching" do
     ConstantReader.new.operations
     second_result = subject.stop
 
-    expect(second_result.keys).to include(
+    expect(second_result).to include(
       fixtures_path("calculator/operations/constant_reader.rb"),
       fixtures_path("calculator/constants.rb")
     )
-    expect(second_result.keys.sort).to eq(first_result.keys.sort)
+    expect(second_result.to_a.sort).to eq(first_result.to_a.sort)
   end
 end

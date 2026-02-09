@@ -38,47 +38,39 @@ RSpec.describe FastCov::Utils do
 
   describe ".relativize_paths" do
     it "converts absolute paths to relative paths" do
-      hash = {"/app/models/user.rb" => true, "/app/models/post.rb" => true}
-      result = described_class.relativize_paths(hash, "/app")
+      set = Set.new(["/app/models/user.rb", "/app/models/post.rb"])
+      result = described_class.relativize_paths(set, "/app")
 
-      expect(result.keys).to contain_exactly("models/user.rb", "models/post.rb")
+      expect(result).to contain_exactly("models/user.rb", "models/post.rb")
     end
 
     it "leaves paths outside root unchanged" do
-      hash = {"/app/models/user.rb" => true, "/other/file.rb" => true}
-      result = described_class.relativize_paths(hash, "/app")
+      set = Set.new(["/app/models/user.rb", "/other/file.rb"])
+      result = described_class.relativize_paths(set, "/app")
 
-      expect(result.keys).to contain_exactly("models/user.rb", "/other/file.rb")
+      expect(result).to contain_exactly("models/user.rb", "/other/file.rb")
     end
 
     it "handles root with trailing slash" do
-      hash = {"/app/models/user.rb" => true}
-      result = described_class.relativize_paths(hash, "/app/")
+      set = Set.new(["/app/models/user.rb"])
+      result = described_class.relativize_paths(set, "/app/")
 
-      expect(result.keys).to contain_exactly("models/user.rb")
+      expect(result).to contain_exactly("models/user.rb")
     end
 
     it "does not match sibling directories with longer names" do
-      hash = {"/app/models/user.rb" => true, "/application/config.rb" => true}
-      result = described_class.relativize_paths(hash, "/app")
+      set = Set.new(["/app/models/user.rb", "/application/config.rb"])
+      result = described_class.relativize_paths(set, "/app")
 
       # /application should NOT be relativized because it's not within /app
-      expect(result.keys).to contain_exactly("models/user.rb", "/application/config.rb")
+      expect(result).to contain_exactly("models/user.rb", "/application/config.rb")
     end
 
-    it "preserves hash values" do
-      hash = {"/app/a.rb" => {lines: [1, 2]}, "/app/b.rb" => {lines: [3, 4]}}
-      result = described_class.relativize_paths(hash, "/app")
+    it "returns the modified set" do
+      set = Set.new(["/app/file.rb"])
+      result = described_class.relativize_paths(set, "/app")
 
-      expect(result["a.rb"]).to eq({lines: [1, 2]})
-      expect(result["b.rb"]).to eq({lines: [3, 4]})
-    end
-
-    it "returns the modified hash" do
-      hash = {"/app/file.rb" => true}
-      result = described_class.relativize_paths(hash, "/app")
-
-      expect(result).to be(hash)
+      expect(result).to be(set)
     end
   end
 end

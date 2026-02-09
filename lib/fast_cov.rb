@@ -39,10 +39,9 @@ module FastCov
 
     def stop
       raise "FastCov.configure must be called before stop" unless configured?
-      result = {}
-      @trackers.reverse_each { |t| result.merge!(t.stop) }
+      result = Set.new
+      @trackers.each { |t| result.merge(t.stop) }
       Utils.relativize_paths(result, @configuration.root)
-      result
     end
 
     def reset

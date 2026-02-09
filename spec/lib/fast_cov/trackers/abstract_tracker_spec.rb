@@ -37,9 +37,9 @@ RSpec.describe FastCov::AbstractTracker do
   end
 
   describe "#start" do
-    it "initializes @files as empty hash" do
+    it "initializes @files as empty Set" do
       tracker.start
-      expect(tracker.instance_variable_get(:@files)).to eq({})
+      expect(tracker.instance_variable_get(:@files)).to eq(Set.new)
     end
 
     it "sets self.class.active to self" do
@@ -77,7 +77,7 @@ RSpec.describe FastCov::AbstractTracker do
     it "returns the recorded files" do
       tracker.record("/app/foo.rb")
       result = tracker.stop
-      expect(result).to eq({ "/app/foo.rb" => true })
+      expect(result).to eq(Set["/app/foo.rb"])
     end
 
     it "clears self.class.active" do
@@ -103,7 +103,7 @@ RSpec.describe FastCov::AbstractTracker do
 
     it "records files within root" do
       tracker.record("/app/models/user.rb")
-      expect(tracker.instance_variable_get(:@files)).to have_key("/app/models/user.rb")
+      expect(tracker.instance_variable_get(:@files)).to include("/app/models/user.rb")
     end
 
     it "ignores files outside root" do
@@ -123,8 +123,8 @@ RSpec.describe FastCov::AbstractTracker do
       tracker.record("/app/bar.txt")
 
       files = tracker.instance_variable_get(:@files)
-      expect(files).to have_key("/app/foo.rb")
-      expect(files).not_to have_key("/app/bar.txt")
+      expect(files).to include("/app/foo.rb")
+      expect(files).not_to include("/app/bar.txt")
     end
 
     context "with threads: false" do
@@ -133,7 +133,7 @@ RSpec.describe FastCov::AbstractTracker do
       it "records from the starting thread" do
         tracker.start
         tracker.record("/app/foo.rb")
-        expect(tracker.instance_variable_get(:@files)).to have_key("/app/foo.rb")
+        expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
       end
 
       it "ignores records from other threads" do
@@ -148,7 +148,7 @@ RSpec.describe FastCov::AbstractTracker do
       it "records from any thread" do
         thread = Thread.new { tracker.record("/app/foo.rb") }
         thread.join
-        expect(tracker.instance_variable_get(:@files)).to have_key("/app/foo.rb")
+        expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
       end
     end
   end
@@ -177,7 +177,7 @@ RSpec.describe FastCov::AbstractTracker do
     it "delegates to active instance when active" do
       tracker.start
       described_class.record("/app/foo.rb")
-      expect(tracker.instance_variable_get(:@files)).to have_key("/app/foo.rb")
+      expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
     end
 
     it "safely no-ops when no active instance" do

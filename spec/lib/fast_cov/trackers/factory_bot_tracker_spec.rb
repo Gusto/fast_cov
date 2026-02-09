@@ -42,7 +42,7 @@ RSpec.describe FastCov::FactoryBotTracker do
       FactoryBot.build(:user)
       result = tracker.stop
 
-      expect(result).to have_key(factory_file)
+      expect(result).to include(factory_file)
     end
 
     it "records files from multiple factory usages" do
@@ -51,14 +51,14 @@ RSpec.describe FastCov::FactoryBotTracker do
       FactoryBot.build(:post)
       result = tracker.stop
 
-      expect(result).to have_key(factory_file)
+      expect(result).to include(factory_file)
     end
 
-    it "returns empty hash when no factories are used" do
+    it "returns empty set when no factories are used" do
       tracker.start
       result = tracker.stop
 
-      expect(result).to eq({})
+      expect(result).to be_empty
     end
 
     it "does not record when tracker is not started" do
@@ -67,7 +67,7 @@ RSpec.describe FastCov::FactoryBotTracker do
       tracker.start
       result = tracker.stop
 
-      expect(result).to eq({})
+      expect(result).to be_empty
     end
   end
 
@@ -125,7 +125,7 @@ RSpec.describe FastCov::FactoryBotTracker do
         thread.join
 
         result = tracker.stop
-        expect(result).to have_key(factory_file)
+        expect(result).to include(factory_file)
       end
     end
 
@@ -155,7 +155,7 @@ RSpec.describe FastCov::FactoryBotTracker do
         FactoryBot.build(:user)
         result = tracker.stop
 
-        expect(result).to have_key(factory_file)
+        expect(result).to include(factory_file)
       end
     end
   end

@@ -22,7 +22,7 @@ module FastCov
     end
 
     def stop
-      @coverage.stop
+      Set.new(@coverage.stop.each_key)
     end
   end
 end

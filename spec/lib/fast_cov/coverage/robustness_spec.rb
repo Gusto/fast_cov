@@ -13,7 +13,7 @@ RSpec.describe FastCov::Coverage, "robustness" do
     end
 
     coverage = subject.stop
-    expect(coverage.keys).to include(
+    expect(coverage).to include(
       fixtures_path("app/model/my_model.rb"),
       fixtures_path("app/model/my_parent_model.rb"),
       fixtures_path("app/model/my_grandparent_model.rb"),
@@ -33,7 +33,7 @@ RSpec.describe FastCov::Coverage, "robustness" do
     MyModel.new
 
     coverage = subject.stop
-    expect(coverage.keys).to include(fixtures_path("app/model/my_model.rb"))
+    expect(coverage).to include(fixtures_path("app/model/my_model.rb"))
   end
 
   it "handles anonymous classes without crashing" do
@@ -49,7 +49,7 @@ RSpec.describe FastCov::Coverage, "robustness" do
 
     coverage = subject.stop
     expect(coverage.size).to eq(4)
-    expect(coverage.keys).to include(
+    expect(coverage).to include(
       fixtures_path("app/model/my_model.rb"),
       fixtures_path("app/model/my_parent_model.rb"),
       fixtures_path("app/model/my_grandparent_model.rb"),
@@ -62,7 +62,7 @@ RSpec.describe FastCov::Coverage, "robustness" do
       subject.start
       MyModel.new
       coverage = subject.stop
-      expect(coverage.keys).to include(fixtures_path("app/model/my_model.rb"))
+      expect(coverage).to include(fixtures_path("app/model/my_model.rb"))
     end
   end
 end

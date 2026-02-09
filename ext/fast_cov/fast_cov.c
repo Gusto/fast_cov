@@ -1,4 +1,5 @@
 #include <ruby.h>
+#include <ruby/version.h>
 #include <ruby/debug.h>
 #include <ruby/st.h>
 
@@ -368,11 +369,10 @@ static VALUE utils_path_within(VALUE self, VALUE path, VALUE directory) {
   return result ? Qtrue : Qfalse;
 }
 
-// Utils.relativize_paths(hash, root) -> hash
-// Mutates hash in place: converts absolute path keys to relative paths from root.
+// Utils.relativize_paths(set, root) -> set
+// Mutates set in place: converts absolute paths to relative paths from root.
 // Paths not within root are left unchanged.
-static VALUE utils_relativize_paths(VALUE self, VALUE hash, VALUE root) {
-  Check_Type(hash, T_HASH);
+static VALUE utils_relativize_paths(VALUE self, VALUE set, VALUE root) {
   Check_Type(root, T_STRING);
 
   // Freeze root to prevent GC from moving it during compaction
@@ -387,12 +387,12 @@ static VALUE utils_relativize_paths(VALUE self, VALUE hash, VALUE root) {
     effective_root_len--;
   }
 
-  // Collect keys to transform (can't modify hash while iterating)
-  VALUE keys = rb_funcall(hash, id_keys, 0);
-  long num_keys = RARRAY_LEN(keys);
+  // Collect paths to transform (can't modify set while iterating)
+  VALUE paths = rb_funcall(set, rb_intern("to_a"), 0);
+  long num_paths = RARRAY_LEN(paths);
 
-  for (long i = 0; i < num_keys; i++) {
-    VALUE abs_path = rb_ary_entry(keys, i);
+  for (long i = 0; i < num_paths; i++) {
+    VALUE abs_path = rb_ary_entry(paths, i);
     if (!RB_TYPE_P(abs_path, T_STRING)) continue;
 
     // Freeze to prevent GC moving it
@@ -413,14 +413,13 @@ static VALUE utils_relativize_paths(VALUE self, VALUE hash, VALUE root) {
     // Create relative path
     VALUE rel_path = rb_str_substr(abs_path, offset, path_len - offset);
 
-    // Get value, delete old key, insert new key
-    VALUE value = rb_hash_aref(hash, abs_path);
-    rb_hash_delete(hash, abs_path);
-    rb_hash_aset(hash, rel_path, value);
+    // Delete old path, add new path
+    rb_funcall(set, rb_intern("delete"), 1, abs_path);
+    rb_funcall(set, rb_intern("add"), 1, rel_path);
   }
 
-  RB_GC_GUARD(keys);
-  return hash;
+  RB_GC_GUARD(paths);
+  return set;
 }
 
 // ---- Cache module methods (FastCov::Cache) ------------------------------

@@ -17,7 +17,7 @@ RSpec.describe FastCov::Coverage, "path filtering" do
       # Line events track the executed files directly, and constant
       # resolution discovers additional files referenced via constants
       # (e.g., calculator.rb references Add, Subtract, Multiply, Divide).
-      expect(coverage.keys).to include(
+      expect(coverage).to include(
         fixtures_path("calculator/calculator.rb"),
         fixtures_path("calculator/operations/add.rb"),
         fixtures_path("calculator/operations/subtract.rb")
@@ -36,7 +36,7 @@ RSpec.describe FastCov::Coverage, "path filtering" do
         coverage = subject.stop
 
         expect(coverage.size).to eq(1)
-        expect(coverage.keys).to include(
+        expect(coverage).to include(
           fixtures_path("calculator/calculator.rb")
         )
       end
@@ -85,7 +85,7 @@ RSpec.describe FastCov::Coverage, "path filtering" do
       coverage = subject.stop
 
       expect(coverage.size).to eq(2)
-      expect(coverage.keys).to include(
+      expect(coverage).to include(
         fixtures_path("calculator/operations/add.rb"),
         fixtures_path("calculator/operations/subtract.rb")
       )
