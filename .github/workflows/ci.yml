@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         ruby: ["3.4", "4.0"]
-        os: [gusto-ubuntu-default, gusto-osx-default]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
