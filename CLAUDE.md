@@ -84,19 +84,21 @@ The C struct uses Ruby's TypedData API with proper `mark` and `free` callbacks. 
 
 ## Benchmark scenarios
 
-The 7 benchmarks in `lib/fast_cov/benchmark/scenarios.rb` measure distinct aspects of the system. When adding new features or optimizing, run `bin/benchmark` before and after to check for regressions.
+The 9 benchmarks in `lib/fast_cov/benchmark/scenarios.rb` measure distinct aspects of the system. When adding new features or optimizing, run `bin/benchmark` before and after to check for regressions.
 
 | Scenario | What it measures |
 |---|---|
 | Line coverage (small) | Overhead of start/stop + tracking a few files via line events |
 | Line coverage (many files) | Same but exercising all fixture files (calculator, models, structs, dynamic dispatch) |
+| Line coverage (single-threaded) | Per-thread hook mode (`threads: false`) vs global hook |
+| Line coverage (with ignored_path) | Overhead of ignored_path filtering in the hot path |
 | Allocation tracing | Overhead of NEWOBJ hooks + ancestor chain resolution at stop time |
-| Constant resolution (cold cache) | Full iseq compile + scan cost when cache is empty |
-| Constant resolution (warm cache) | Cache hit path — just MD5 digest comparison, no compilation |
+| Constant resolution (cold cache) | Full Prism parse + const resolution when cache is empty |
+| Constant resolution (warm cache) | Cache hit path — just MD5 digest comparison, no parsing |
 | Rapid start/stop (100x) | Hook install/remove overhead across many cycles |
 | Multi-threaded coverage | Thread creation + global hook overhead |
 
-The runner takes 7 samples per scenario and reports the **median** to filter outliers. GC is run between samples. Default is 1000 iterations per sample.
+The runner takes 5 samples per scenario and reports the **median** to filter outliers. GC is run between samples. Default is 1000 iterations per sample.
 
 ## Testing conventions
 

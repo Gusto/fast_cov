@@ -11,7 +11,6 @@
 // Tracks which source files are executed during a test run by hooking into
 // Ruby VM events. Designed for test impact analysis.
 
-#define PROFILE_FRAMES_BUFFER_SIZE 1
 #define MAX_CONST_RESOLUTION_ROUNDS 10
 
 // threads: true = multi-threaded (global hook), false = single-threaded (per-thread hook)
@@ -30,7 +29,6 @@ static ID id_clear;
 static ID id_merge_bang;
 
 // Forward declarations
-static void on_newobj_event(VALUE tracepoint_data, void *data);
 static VALUE fast_cov_stop(VALUE self);
 
 static int mark_key_for_gc_i(st_data_t key, st_data_t _value,
@@ -152,10 +150,7 @@ static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
   data->last_filename_ptr = current_filename_ptr;
 
   VALUE top_frame;
-  int captured_frames =
-      rb_profile_frames(0, PROFILE_FRAMES_BUFFER_SIZE, &top_frame, NULL);
-
-  if (captured_frames != PROFILE_FRAMES_BUFFER_SIZE) {
+  if (rb_profile_frames(0, 1, &top_frame, NULL) != 1) {
     return;
   }
 
@@ -169,16 +164,8 @@ static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
 
 // ---- Allocation tracing helpers -----------------------------------------
 
-static VALUE safely_get_class_name(VALUE klass) {
-  return fast_cov_rescue_nil(rb_class_name, klass);
-}
-
-static VALUE safely_get_mod_ancestors(VALUE klass) {
-  return fast_cov_rescue_nil(rb_mod_ancestors, klass);
-}
-
 static bool record_impacted_klass(struct fast_cov_data *data, VALUE klass) {
-  VALUE klass_name = safely_get_class_name(klass);
+  VALUE klass_name = fast_cov_rescue_nil(rb_class_name, klass);
   if (klass_name == Qnil) {
     return false;
   }
@@ -196,7 +183,7 @@ static int each_instantiated_klass(st_data_t key, st_data_t _value,
   VALUE klass = (VALUE)key;
   struct fast_cov_data *data = (struct fast_cov_data *)cb_data;
 
-  VALUE ancestors = safely_get_mod_ancestors(klass);
+  VALUE ancestors = fast_cov_rescue_nil(rb_mod_ancestors, klass);
   if (ancestors == Qnil || !RB_TYPE_P(ancestors, T_ARRAY)) {
     return ST_CONTINUE;
   }
@@ -225,7 +212,12 @@ static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
   }
 
   VALUE klass = rb_class_of(new_object);
+#if RUBY_API_VERSION_MAJOR < 4
+  // Ruby 3.x: rb_class_of can return 0 during NEWOBJ for some allocations
   if (klass == Qnil || klass == 0) {
+#else
+  if (klass == Qnil) {
+#endif
     return;
   }
   if (rb_mod_name(klass) == Qnil) {
@@ -543,7 +535,7 @@ static VALUE fast_cov_stop(VALUE self) {
 
   if (!data->threads) {
     VALUE thval = rb_thread_current();
-    if (!rb_equal(thval, data->th_covered)) {
+    if (thval != data->th_covered) {
       rb_raise(rb_eRuntimeError, "Coverage was not started by this thread");
     }
     rb_thread_remove_event_hook(data->th_covered, on_line_event);

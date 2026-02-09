@@ -7,7 +7,7 @@ module FastCov
   module Benchmark
     class Runner
       DEFAULT_ITERATIONS = 1000
-      DEFAULT_SAMPLES = 7
+      DEFAULT_SAMPLES = 5
       WARMUP_ITERATIONS = 20
 
       attr_reader :iterations, :samples, :baseline_path
