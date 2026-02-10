@@ -51,8 +51,8 @@ Call `FastCov.configure` before using `start`/`stop`. The block yields a `Config
 
 ```ruby
 FastCov.configure do |config|
-  config.root = Rails.root.to_s
-  config.ignored_path = Rails.root.join("vendor").to_s
+  config.root = Rails.root
+  config.ignored_path = Rails.root.join("vendor")
   config.threads = true
 
   config.use FastCov::CoverageTracker
@@ -94,7 +94,7 @@ FastCov.reset                  # Clear configuration and trackers.
 ```ruby
 # spec/support/fast_cov.rb
 FastCov.configure do |config|
-  config.root = Rails.root.to_s
+  config.root = Rails.root
   config.use FastCov::CoverageTracker
   config.use FastCov::FileTracker
 end
