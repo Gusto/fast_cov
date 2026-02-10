@@ -133,7 +133,7 @@ config.use FastCov::CoverageTracker
 
 **Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
 
-**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached with MD5 digests for invalidation.
+**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
 
 #### Disabling expensive features
 
@@ -295,7 +295,7 @@ Results from all trackers are merged, with later trackers overwriting earlier on
 
 ## Cache
 
-FastCov caches constant reference resolution results in memory so files only need parsing once per process. The cache is process-level, content-addressed (MD5 digests), and populated automatically during `stop`.
+FastCov caches constant reference resolution results in memory so files only need parsing once per process. The cache is process-level, keyed by filename, and populated automatically during `stop`.
 
 ```ruby
 FastCov::Cache.data      # the raw cache hash
