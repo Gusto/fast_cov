@@ -116,3 +116,8 @@ The runner takes 5 samples per scenario and reports the **median** to filter out
 - **Process-level cache.** The iseq compilation cache is static/global, shared across all Coverage instances. In a test suite, the same source files are analyzed repeatedly — the cache means each file is compiled once.
 - **No disk cache (for now).** The in-memory cache is sufficient for single test suite runs. Disk persistence was built and removed — it can be added back when needed.
 - **Ruby 3.4+ only.** No version-conditional code. `GC.compact`, `Data.define`, `each_child` on iseq are all available unconditionally.
+
+## Releasing
+
+- **Always ask before releasing a new version.** Do not bump version or create releases without explicit user approval.
+- **Release names should be `vX.Y.Z`** — no extra words or descriptions in the release title.
