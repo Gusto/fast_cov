@@ -43,8 +43,8 @@ module FastCov
 
     def record(abs_path)
       return if !@threads && Thread.current != @started_thread
-      return unless abs_path.start_with?(@root)
-      return if @ignored_path && abs_path.start_with?(@ignored_path)
+      return unless Utils.path_within?(abs_path, @root)
+      return if @ignored_path && Utils.path_within?(abs_path, @ignored_path)
       @files.add(abs_path) if on_record(abs_path)
     end
 
