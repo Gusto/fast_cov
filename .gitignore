@@ -2,6 +2,9 @@
 lib/fast_cov/*.bundle
 lib/fast_cov/*.so
 lib/fast_cov/.source_digest.*
+# Stray binaries (sometimes created without extension)
+/fast_cov
+lib/fast_cov/fast_cov
 ext/fast_cov/*.o
 ext/fast_cov/*.bundle
 ext/fast_cov/*.so
