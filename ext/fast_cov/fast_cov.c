@@ -23,13 +23,8 @@ static ID id_keys;
 
 // Cache infrastructure
 VALUE fast_cov_cache_hash; // process-level cache (non-static for access from utils)
-static VALUE cDigest;             // Digest::MD5
-static VALUE cFile;               // File class
-static ID id_file;
-static ID id_hexdigest;
 static ID id_clear;
 static ID id_merge_bang;
-static ID id_mtime;
 
 // Forward declarations
 static VALUE fast_cov_stop(VALUE self);
@@ -233,90 +228,23 @@ static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
 
 // ---- Constant reference resolution (cached) -----------------------------
 
-// Get file mtime as a Time object.
-static VALUE get_file_mtime_body(VALUE filename) {
-  return rb_funcall(cFile, id_mtime, 1, filename);
-}
-
-static VALUE get_file_mtime(VALUE filename) {
-  int exception_state;
-  VALUE result = rb_protect(get_file_mtime_body, filename, &exception_state);
-  if (exception_state != 0) {
-    rb_set_errinfo(Qnil);
-    return Qnil;
-  }
-  return result;
-}
-
-// Computes MD5 hexdigest of a file's contents.
-static VALUE compute_file_digest_body(VALUE filename) {
-  VALUE digest_obj = rb_funcall(cDigest, id_file, 1, filename);
-  return rb_funcall(digest_obj, id_hexdigest, 0);
-}
-
-static VALUE compute_file_digest(VALUE filename) {
-  int exception_state;
-  VALUE result =
-      rb_protect(compute_file_digest_body, filename, &exception_state);
-  if (exception_state != 0) {
-    rb_set_errinfo(Qnil);
-    return Qnil;
-  }
-  return result;
-}
-
 // Parse file with Prism and extract constant names.
 static VALUE extract_const_names_body(VALUE filename) {
   return rb_funcall(cConstantExtractor, id_extract, 1, filename);
 }
 
 // Returns an array of constant name strings for a file, using the cache.
-// Uses mtime as fast cache validation before falling back to MD5 digest.
+// Cache is keyed by filename only - once parsed, results are cached for
+// the lifetime of the process. No digest/mtime validation needed since
+// files don't change during a test suite run.
 static VALUE get_const_refs_for_file(VALUE filename) {
   VALUE const_refs_hash =
       rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")));
 
-  VALUE cached_entry = rb_hash_lookup(const_refs_hash, filename);
-
-  // Fast path: check mtime first (cheap stat syscall vs reading whole file)
-  VALUE current_mtime = get_file_mtime(filename);
-  if (NIL_P(current_mtime)) {
-    if (!NIL_P(cached_entry)) {
-      rb_hash_delete(const_refs_hash, filename);
-    }
-    return Qnil;
-  }
-
-  // Cache hit: mtime matches - return cached refs without MD5
-  if (!NIL_P(cached_entry) && RB_TYPE_P(cached_entry, T_HASH)) {
-    VALUE cached_mtime =
-        rb_hash_lookup(cached_entry, ID2SYM(rb_intern("mtime")));
-
-    if (!NIL_P(cached_mtime) && rb_equal(cached_mtime, current_mtime) == Qtrue) {
-      return rb_hash_lookup(cached_entry, ID2SYM(rb_intern("refs")));
-    }
-  }
-
-  // Mtime changed or no cache - compute digest and check
-  VALUE current_digest = compute_file_digest(filename);
-  if (NIL_P(current_digest)) {
-    if (!NIL_P(cached_entry)) {
-      rb_hash_delete(const_refs_hash, filename);
-    }
-    return Qnil;
-  }
-
-  // Check if digest matches (file touched but content unchanged)
-  if (!NIL_P(cached_entry) && RB_TYPE_P(cached_entry, T_HASH)) {
-    VALUE cached_digest =
-        rb_hash_lookup(cached_entry, ID2SYM(rb_intern("digest")));
-
-    if (!NIL_P(cached_digest) &&
-        rb_str_equal(cached_digest, current_digest) == Qtrue) {
-      // Content unchanged - update mtime and return cached refs
-      rb_hash_aset(cached_entry, ID2SYM(rb_intern("mtime")), current_mtime);
-      return rb_hash_lookup(cached_entry, ID2SYM(rb_intern("refs")));
-    }
+  // Cache hit: return cached refs
+  VALUE cached = rb_hash_lookup(const_refs_hash, filename);
+  if (cached != Qnil) {
+    return cached;
   }
 
   // Cache miss: parse with Prism and extract constant names
@@ -325,18 +253,11 @@ static VALUE get_const_refs_for_file(VALUE filename) {
       rb_protect(extract_const_names_body, filename, &exception_state);
   if (exception_state != 0) {
     rb_set_errinfo(Qnil);
-    if (!NIL_P(cached_entry)) {
-      rb_hash_delete(const_refs_hash, filename);
-    }
     return Qnil;
   }
 
-  // Store in cache with both mtime and digest
-  VALUE new_entry = rb_hash_new();
-  rb_hash_aset(new_entry, ID2SYM(rb_intern("mtime")), current_mtime);
-  rb_hash_aset(new_entry, ID2SYM(rb_intern("digest")), current_digest);
-  rb_hash_aset(new_entry, ID2SYM(rb_intern("refs")), const_names);
-  rb_hash_aset(const_refs_hash, filename, new_entry);
+  // Store in cache (filename -> refs)
+  rb_hash_aset(const_refs_hash, filename, const_names);
 
   return const_names;
 }
@@ -610,20 +531,10 @@ static VALUE fast_cov_stop(VALUE self) {
 void Init_fast_cov(void) {
   id_extract = rb_intern("extract");
   id_keys = rb_intern("keys");
-  id_file = rb_intern("file");
-  id_hexdigest = rb_intern("hexdigest");
   id_clear = rb_intern("clear");
   id_merge_bang = rb_intern("merge!");
-  id_mtime = rb_intern("mtime");
 
-  rb_require("digest/md5");
   rb_require("fast_cov/constant_extractor");
-  VALUE mDigest = rb_const_get(rb_cObject, rb_intern("Digest"));
-  cDigest = rb_const_get(mDigest, rb_intern("MD5"));
-  rb_gc_register_address(&cDigest);
-
-  cFile = rb_const_get(rb_cObject, rb_intern("File"));
-  rb_gc_register_address(&cFile);
 
   // Initialize process-level cache
   fast_cov_cache_hash = rb_hash_new();
