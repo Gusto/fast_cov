@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: write  # Required for uploading release assets
-  id-token: write  # Required for Trusted Publishing (OIDC)
 
 jobs:
   publish:
@@ -23,10 +22,9 @@ jobs:
         run: gem build fast_cov.gemspec
 
       - name: Push to RubyGems
-        uses: rubygems/release-gem@v1
-        with:
-          # Remove this line after setting up Trusted Publishing on rubygems.org
-          api-key: ${{ secrets.RUBYGEMS_API_KEY }}
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: gem push fast_cov-*.gem
 
       - name: Upload gem to release
         env:
