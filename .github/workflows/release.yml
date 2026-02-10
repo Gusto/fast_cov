@@ -27,6 +27,7 @@ jobs:
         run: gem push fast_cov-*.gem
 
       - name: Upload gem to release
+        continue-on-error: true  # May fail due to IP allow list restrictions
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
