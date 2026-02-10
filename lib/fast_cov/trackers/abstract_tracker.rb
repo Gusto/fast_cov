@@ -61,8 +61,19 @@ module FastCov
     class << self
       attr_accessor :active
 
-      def record(abs_path)
-        @active&.record(abs_path)
+      # Record a file path. Accepts a path directly or a block that returns the path.
+      # If block given, it's only executed when tracker is active (avoids expensive work).
+      # Nil values are ignored.
+      #
+      #   record("/path/to/file.rb")           # direct path
+      #   record { expensive_lookup }          # lazy evaluation
+      #   record("/path") { fallback }         # path takes precedence
+      #
+      def record(abs_path = nil)
+        return unless active
+
+        path = abs_path || (yield if block_given?)
+        active.record(path) if path
       end
 
       def reset

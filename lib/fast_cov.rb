@@ -7,6 +7,7 @@ require_relative "fast_cov/trackers/abstract_tracker"
 require_relative "fast_cov/trackers/coverage_tracker"
 require_relative "fast_cov/trackers/file_tracker"
 require_relative "fast_cov/trackers/factory_bot_tracker"
+require_relative "fast_cov/trackers/const_get_tracker"
 
 module FastCov
   class << self

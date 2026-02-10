@@ -189,6 +189,34 @@ config.use FastCov::FactoryBotTracker
 
 Prepends a module on `FactoryBot.factories.singleton_class` to intercept the `find` method (called by `create`, `build`, etc.). When a factory is used, the tracker walks its declaration blocks and extracts `source_location` from each proc to find the factory definition file.
 
+### ConstGetTracker
+
+Tracks constants looked up dynamically via `Module#const_get`. This catches dynamic constant lookups that static analysis (Prism) would miss.
+
+```ruby
+config.use FastCov::ConstGetTracker
+```
+
+#### What it catches
+
+- `Object.const_get("Foo::Bar")`
+- Rails' `"UserMailer".constantize` (uses `const_get` under the hood)
+- Any metaprogramming that looks up constants by string name
+
+**Note:** This does NOT catch direct constant references like `Foo::Bar` in source code -- those compile to `opt_getconstant_path` bytecode and bypass `const_get`. Use `CoverageTracker` with `constant_references: true` for static analysis of literal constant references.
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `root` | String | `config.root` | Override the root path for this tracker. |
+| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
+| `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
+
+#### How it works
+
+Prepends a module on `Module` to intercept `const_get` calls. When a constant is looked up, the tracker calls `const_source_location` to find where the constant was defined and records that file.
+
 ## Writing custom trackers
 
 There are two approaches to writing custom trackers: from scratch (minimal interface) or inheriting from `AbstractTracker` (batteries included).

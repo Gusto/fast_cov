@@ -15,33 +15,25 @@ module FastCov
 
     module FilePatch
       def read(name, *args, **kwargs, &block)
-        FastCov::FileTracker.record_for_active(name)
-        super
+        super.tap { FastCov::FileTracker.record { FastCov::FileTracker.expand_path(name) } }
       end
 
       def open(name, *args, **kwargs, &block)
         mode = args[0]
         is_read = mode.nil? || (mode.is_a?(String) && mode.start_with?("r")) ||
                   (mode.is_a?(Integer) && (mode & (File::WRONLY | File::RDWR)).zero?)
-        FastCov::FileTracker.record_for_active(name) if is_read
-        super
+        super.tap { FastCov::FileTracker.record { FastCov::FileTracker.expand_path(name) } if is_read }
       end
     end
 
     class << self
-      def record_for_active(path)
-        return unless @active
-
+      def expand_path(path)
         path_str = path.to_s
         return if path_str.empty?
 
-        abs_path = begin
-          File.expand_path(path_str)
-        rescue ArgumentError, TypeError
-          return
-        end
-
-        @active.record(abs_path)
+        File.expand_path(path_str)
+      rescue ArgumentError, TypeError
+        nil
       end
     end
   end

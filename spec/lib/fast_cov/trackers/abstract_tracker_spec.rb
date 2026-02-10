@@ -183,6 +183,34 @@ RSpec.describe FastCov::AbstractTracker do
     it "safely no-ops when no active instance" do
       expect { described_class.record("/app/foo.rb") }.not_to raise_error
     end
+
+    context "with block form" do
+      it "yields block and records result when active" do
+        tracker.start
+        described_class.record { "/app/foo.rb" }
+        expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
+      end
+
+      it "does not yield block when inactive" do
+        yielded = false
+        described_class.record { yielded = true; "/app/foo.rb" }
+        expect(yielded).to be false
+      end
+
+      it "ignores nil block results" do
+        tracker.start
+        described_class.record { nil }
+        expect(tracker.instance_variable_get(:@files)).to be_empty
+      end
+
+      it "prefers direct value over block" do
+        tracker.start
+        described_class.record("/app/direct.rb") { "/app/block.rb" }
+        files = tracker.instance_variable_get(:@files)
+        expect(files).to include("/app/direct.rb")
+        expect(files).not_to include("/app/block.rb")
+      end
+    end
   end
 
   describe "subclass isolation" do

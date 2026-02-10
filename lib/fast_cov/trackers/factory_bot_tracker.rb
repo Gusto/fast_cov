@@ -30,7 +30,7 @@ module FastCov
 
     class << self
       def record_factory_files(factory)
-        return unless @active
+        return unless active
 
         definition = factory.definition
         declarations = definition.instance_variable_get(:@declarations)
@@ -43,8 +43,7 @@ module FastCov
           location = block.source_location
           next unless location
 
-          file_path = location[0]
-          @active.record(file_path)
+          record(location[0])
         end
       end
     end
