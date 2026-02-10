@@ -22,7 +22,7 @@ RSpec.describe FastCov::Configuration do
   describe "#root=" do
     subject(:config) { described_class.new }
 
-    it "accepts a String" do
+    it "accepts an absolute path String" do
       config.root = "/app"
       expect(config.root).to eq("/app")
     end
@@ -37,12 +37,21 @@ RSpec.describe FastCov::Configuration do
       config.root = nil
       expect(config.root).to be_nil
     end
+
+    it "raises on relative path" do
+      expect { config.root = "app" }.to raise_error(
+        FastCov::Configuration::ConfigurationError,
+        /root must be an absolute path/
+      )
+    end
   end
 
   describe "#ignored_path=" do
     subject(:config) { described_class.new }
 
-    it "accepts a String" do
+    before { config.root = "/app" }
+
+    it "accepts an absolute path inside root" do
       config.ignored_path = "/app/vendor"
       expect(config.ignored_path).to eq("/app/vendor")
     end
@@ -56,6 +65,23 @@ RSpec.describe FastCov::Configuration do
     it "handles nil" do
       config.ignored_path = nil
       expect(config.ignored_path).to be_nil
+    end
+
+    it "expands relative paths against root" do
+      config.ignored_path = "vendor"
+      expect(config.ignored_path).to eq("/app/vendor")
+    end
+
+    it "expands nested relative paths against root" do
+      config.ignored_path = "vendor/bundle"
+      expect(config.ignored_path).to eq("/app/vendor/bundle")
+    end
+
+    it "raises when absolute path is outside root" do
+      expect { config.ignored_path = "/other/path" }.to raise_error(
+        FastCov::Configuration::ConfigurationError,
+        /ignored_path must be inside root/
+      )
     end
   end
 end
