@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write  # Required for uploading release assets
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -30,4 +33,5 @@ jobs:
       - name: Upload gem to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload ${{ github.event.release.tag_name }} fast_cov-*.gem
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" fast_cov-*.gem
