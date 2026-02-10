@@ -56,6 +56,30 @@ RSpec.describe "FastCov file tracking" do
       expect(coverage.any? { |k| k.end_with?("spec_helper.rb") }).to be false
     end
 
+    it "does not track files that fail to read" do
+      FastCov.start
+      begin
+        File.read(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = FastCov.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to open" do
+      FastCov.start
+      begin
+        File.open(fixtures_path("calculator", "nonexistent.yml"), "r") { |f| f.read }
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = FastCov.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
     it "does not track write operations via File.open" do
       FastCov.start
       File.open(fixtures_path("calculator", "tmp_write_test.txt"), "w") { |f| f.write("test") }

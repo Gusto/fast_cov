@@ -24,24 +24,11 @@ module FastCov
     module ConstGetPatch
       def const_get(name, inherit = true)
         result = super
-        FastCov::ConstGetTracker.record_const_location(self, name, inherit)
-        result
-      end
-    end
-
-    class << self
-      def record_const_location(mod, name, inherit)
-        return unless @active
-
-        location = begin
-          mod.const_source_location(name, inherit)
-        rescue NameError, TypeError
-          nil
+        FastCov::ConstGetTracker.record do
+          location = self.const_source_location(name, inherit) rescue nil
+          location&.first
         end
-
-        return unless location&.first
-
-        @active.record(location[0])
+        result
       end
     end
   end
