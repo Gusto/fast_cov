@@ -49,7 +49,7 @@ struct fast_cov_data {
   uintptr_t last_filename_ptr;
 
   bool threads;
-  bool constant_references;
+  VALUE constant_references_mode; // Qfalse, or :simple/:expanded symbol
   bool allocations;
   VALUE th_covered;
 
@@ -68,6 +68,7 @@ static void fast_cov_mark(void *ptr) {
   rb_gc_mark(data->impacted_files);
   rb_gc_mark(data->th_covered);
   rb_gc_mark(data->object_allocation_tracepoint);
+  rb_gc_mark(data->constant_references_mode);
 
   if (data->klasses_table != NULL) {
     st_foreach(data->klasses_table, mark_key_for_gc_i, 0);
@@ -102,6 +103,7 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->impacted_files = Qnil;
   data->th_covered = Qnil;
   data->object_allocation_tracepoint = Qnil;
+  data->constant_references_mode = Qnil;
   data->klasses_table = NULL;
 
   data->impacted_files = rb_hash_new();
@@ -111,7 +113,7 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->ignored_path_len = 0;
   data->last_filename_ptr = 0;
   data->threads = true;
-  data->constant_references = true;
+  data->constant_references_mode = ID2SYM(rb_intern("expanded")); // default
   data->allocations = true;
   data->klasses_table = st_init_numtable();
 
@@ -229,15 +231,18 @@ static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
 // ---- Constant reference resolution (cached) -----------------------------
 
 // Parse file with Prism and extract constant names.
-static VALUE extract_const_names_body(VALUE filename) {
-  return rb_funcall(cConstantExtractor, id_extract, 1, filename);
+// args_ary is a Ruby Array [filename, mode]
+static VALUE extract_const_names_body(VALUE args_ary) {
+  VALUE filename = rb_ary_entry(args_ary, 0);
+  VALUE mode = rb_ary_entry(args_ary, 1);
+  return rb_funcall(cConstantExtractor, id_extract, 2, filename, mode);
 }
 
 // Returns an array of constant name strings for a file, using the cache.
 // Cache is keyed by filename only - once parsed, results are cached for
 // the lifetime of the process. No digest/mtime validation needed since
 // files don't change during a test suite run.
-static VALUE get_const_refs_for_file(VALUE filename) {
+static VALUE get_const_refs_for_file(VALUE filename, VALUE mode) {
   VALUE const_refs_hash =
       rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")));
 
@@ -248,9 +253,10 @@ static VALUE get_const_refs_for_file(VALUE filename) {
   }
 
   // Cache miss: parse with Prism and extract constant names
+  VALUE args_ary = rb_ary_new_from_args(2, filename, mode);
   int exception_state;
   VALUE const_names =
-      rb_protect(extract_const_names_body, filename, &exception_state);
+      rb_protect(extract_const_names_body, args_ary, &exception_state);
   if (exception_state != 0) {
     rb_set_errinfo(Qnil);
     return Qnil;
@@ -279,7 +285,7 @@ static void resolve_constant_references(struct fast_cov_data *data) {
       }
       rb_hash_aset(processed_files, filename, Qtrue);
 
-      VALUE const_names = get_const_refs_for_file(filename);
+      VALUE const_names = get_const_refs_for_file(filename, data->constant_references_mode);
       if (NIL_P(const_names) || !RB_TYPE_P(const_names, T_ARRAY)) {
         continue;
       }
@@ -427,10 +433,18 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   VALUE rb_threads = rb_hash_lookup(opt, ID2SYM(rb_intern("threads")));
   bool threads = (rb_threads != Qfalse);
 
-  // constant_references: defaults to true
+  // constant_references: false, :simple, or :expanded (default)
   VALUE rb_const_refs =
       rb_hash_lookup(opt, ID2SYM(rb_intern("constant_references")));
-  bool constant_references = (rb_const_refs != Qfalse);
+  VALUE constant_references_mode;
+  if (rb_const_refs == Qfalse) {
+    constant_references_mode = Qfalse;
+  } else if (rb_const_refs == ID2SYM(rb_intern("simple"))) {
+    constant_references_mode = ID2SYM(rb_intern("simple"));
+  } else {
+    // Default to :expanded for true, nil, or :expanded
+    constant_references_mode = ID2SYM(rb_intern("expanded"));
+  }
 
   // allocations: defaults to true
   VALUE rb_allocations =
@@ -441,7 +455,7 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
   data->threads = threads;
-  data->constant_references = constant_references;
+  data->constant_references_mode = constant_references_mode;
   data->allocations = allocations;
   data->root_len = RSTRING_LEN(rb_root);
   data->root =
@@ -514,7 +528,7 @@ static VALUE fast_cov_stop(VALUE self) {
     st_clear(data->klasses_table);
   }
 
-  if (data->constant_references) {
+  if (data->constant_references_mode != Qfalse) {
     resolve_constant_references(data);
   }
 
