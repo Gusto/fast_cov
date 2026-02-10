@@ -7,7 +7,8 @@ require "digest/md5"
 module FastCov
   module Compiler
     EXT_DIR = File.expand_path("../../ext/fast_cov", __dir__)
-    LIB_DIR = File.expand_path("../fast_cov", __dir__)
+    LIB_DIR = File.expand_path("..", __dir__)     # lib/
+    FAST_COV_DIR = File.expand_path(".", __dir__) # lib/fast_cov/
 
     def self.compile!
       Dir.chdir(EXT_DIR) do
@@ -29,8 +30,7 @@ module FastCov
     end
 
     def self.extension_exists?
-      ext_name = "fast_cov.#{RUBY_VERSION}_#{RUBY_PLATFORM}"
-      Dir.glob(File.join(LIB_DIR, "#{ext_name}.{bundle,so}")).any?
+      Dir.glob(File.join(FAST_COV_DIR, "fast_cov.{bundle,so}")).any?
     end
 
     def self.source_digest
@@ -40,7 +40,8 @@ module FastCov
     end
 
     def self.digest_path
-      File.join(LIB_DIR, ".source_digest.#{RUBY_VERSION}_#{RUBY_PLATFORM}")
+      # Keep version-specific so we recompile when switching Ruby versions
+      File.join(FAST_COV_DIR, ".source_digest.#{RUBY_VERSION}")
     end
 
     def self.write_digest

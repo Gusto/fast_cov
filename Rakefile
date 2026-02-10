@@ -6,7 +6,7 @@ require "fileutils"
 desc "Compile the C extension for the current Ruby version"
 task compile: :clean do
   ext_dir = File.expand_path("ext/fast_cov", __dir__)
-  lib_dir = File.expand_path("lib/fast_cov", __dir__)
+  lib_dir = File.expand_path("lib", __dir__)
 
   Dir.chdir(ext_dir) do
     sh RbConfig.ruby, "extconf.rb"
@@ -20,7 +20,8 @@ task :clean do
   ext_dir = File.expand_path("ext/fast_cov", __dir__)
   lib_dir = File.expand_path("lib/fast_cov", __dir__)
 
-  FileUtils.rm_f(Dir.glob(File.join(lib_dir, "*.{bundle,so}")))
+  FileUtils.rm_f(Dir.glob(File.join(lib_dir, "fast_cov.{bundle,so}")))
+  FileUtils.rm_f(Dir.glob(File.join(lib_dir, ".source_digest.*")))
   FileUtils.rm_f(Dir.glob(File.join(ext_dir, "*.{o,bundle,so}")))
   FileUtils.rm_f(File.join(ext_dir, "Makefile"))
   FileUtils.rm_f(File.join(ext_dir, "mkmf.log"))
