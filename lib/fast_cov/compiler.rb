@@ -11,6 +11,8 @@ module FastCov
     FAST_COV_DIR = File.expand_path(".", __dir__) # lib/fast_cov/
 
     def self.compile!
+      clean_ext_dir!
+
       Dir.chdir(EXT_DIR) do
         system(RbConfig.ruby, "extconf.rb") || raise("FastCov: extconf.rb failed")
         system("make") || raise("FastCov: make failed")
@@ -18,6 +20,16 @@ module FastCov
       end
 
       write_digest
+    end
+
+    def self.clean_ext_dir!
+      # Clean stale build artifacts to prevent issues when switching Ruby versions
+      FileUtils.rm_f(Dir.glob(File.join(EXT_DIR, "*.o")))
+      FileUtils.rm_f(Dir.glob(File.join(EXT_DIR, "*.bundle")))
+      FileUtils.rm_f(Dir.glob(File.join(EXT_DIR, "*.so")))
+      FileUtils.rm_f(File.join(EXT_DIR, "Makefile"))
+      FileUtils.rm_f(File.join(EXT_DIR, "mkmf.log"))
+      FileUtils.rm_rf(Dir.glob(File.join(EXT_DIR, "*.dSYM")))
     end
 
     def self.stale?
