@@ -13,7 +13,7 @@ module FastCov
       @root = Dir.pwd
       @ignored_path = nil
       @threads = true
-      @trackers = []
+      @tracker_definitions = []
     end
 
     def root=(value)
@@ -46,11 +46,15 @@ module FastCov
     end
 
     def use(tracker_class, **options)
-      @trackers << {klass: tracker_class, options: options}
+      @tracker_definitions << {klass: tracker_class, options: options}
     end
 
-    def trackers
-      @trackers
+    def install_trackers
+      @tracker_definitions.map do |entry|
+        tracker = entry[:klass].new(self, **entry[:options])
+        tracker.install if tracker.respond_to?(:install)
+        tracker
+      end
     end
 
     def reset
