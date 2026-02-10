@@ -30,7 +30,7 @@ module FastCov
     end
 
     def self.extension_exists?
-      Dir.glob(File.join(FAST_COV_DIR, "fast_cov.{bundle,so}")).any?
+      Dir.glob(File.join(FAST_COV_DIR, "fast_cov.#{RUBY_VERSION}.{bundle,so}")).any?
     end
 
     def self.source_digest

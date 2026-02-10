@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "fast_cov/version"
-require "fast_cov/fast_cov"
+require "fast_cov/fast_cov.#{RUBY_VERSION}"
 require_relative "fast_cov/configuration"
 require_relative "fast_cov/trackers/abstract_tracker"
 require_relative "fast_cov/trackers/coverage_tracker"
