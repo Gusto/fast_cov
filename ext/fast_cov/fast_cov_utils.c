@@ -66,7 +66,7 @@ VALUE fast_cov_rescue_nil(VALUE (*fn)(VALUE), VALUE arg) {
 }
 
 VALUE fast_cov_get_const_source_location(VALUE const_name_str) {
-  return rb_funcall(rb_cObject, rb_intern("const_source_location"), 1,
+  return rb_funcall(rb_cObject, fast_cov_id_const_source_location, 1,
                     const_name_str);
 }
 
@@ -78,10 +78,10 @@ VALUE fast_cov_safely_get_const_source_location(VALUE const_name_str) {
 VALUE fast_cov_resolve_const_to_file(VALUE const_name_str) {
   // Check cache first
   VALUE const_locations_hash =
-      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")));
+      rb_hash_lookup(fast_cov_cache_hash, fast_cov_cache_key_const_locations);
   VALUE cached = rb_hash_lookup(const_locations_hash, const_name_str);
   if (cached != Qnil) {
-    return cached;
+    return cached == Qfalse ? Qnil : cached;
   }
 
   // Cache miss - resolve via Object.const_source_location
@@ -89,11 +89,13 @@ VALUE fast_cov_resolve_const_to_file(VALUE const_name_str) {
       fast_cov_safely_get_const_source_location(const_name_str);
   if (NIL_P(source_location) || !RB_TYPE_P(source_location, T_ARRAY) ||
       RARRAY_LEN(source_location) == 0) {
+    rb_hash_aset(const_locations_hash, const_name_str, Qfalse);
     return Qnil;
   }
 
   VALUE filename = RARRAY_AREF(source_location, 0);
   if (NIL_P(filename) || !RB_TYPE_P(filename, T_STRING)) {
+    rb_hash_aset(const_locations_hash, const_name_str, Qfalse);
     return Qnil;
   }
 

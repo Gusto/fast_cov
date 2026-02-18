@@ -80,6 +80,38 @@ module FastCov
           cov.stop
         end
 
+        runner.scenario("Constant resolution + ancestors (cold cache)") do
+          FastCov::Cache.clear
+          cov = FastCov::Coverage.new(
+            root: root_app,
+            allocations: false,
+            ancestor_references: true
+          )
+          cov.start
+          DynamicIncludedModelReader.new.model_class
+          cov.stop
+        end
+
+        runner.scenario("Constant resolution + ancestors (warm cache)") do
+          warm = FastCov::Coverage.new(
+            root: root_app,
+            allocations: false,
+            ancestor_references: true
+          )
+          warm.start
+          DynamicIncludedModelReader.new.model_class
+          warm.stop
+
+          cov = FastCov::Coverage.new(
+            root: root_app,
+            allocations: false,
+            ancestor_references: true
+          )
+          cov.start
+          DynamicIncludedModelReader.new.model_class
+          cov.stop
+        end
+
         runner.scenario("Rapid start/stop (100x)") do
           cov = FastCov::Coverage.new(root: root_calculator)
           100.times do
