@@ -24,8 +24,18 @@ static ID id_keys;
 
 // Cache infrastructure
 VALUE fast_cov_cache_hash; // process-level cache (non-static for access from utils)
+VALUE fast_cov_cache_key_const_refs;
+VALUE fast_cov_cache_key_const_locations;
+VALUE fast_cov_cache_key_const_ancestor_files;
+ID fast_cov_id_const_source_location;
 static ID id_clear;
 static ID id_merge_bang;
+static VALUE sym_root;
+static VALUE sym_ignored_path;
+static VALUE sym_threads;
+static VALUE sym_constant_references;
+static VALUE sym_ancestor_references;
+static VALUE sym_allocations;
 
 // Forward declarations
 static VALUE fast_cov_stop(VALUE self);
@@ -242,7 +252,7 @@ static VALUE extract_const_names_body(VALUE filename) {
 // files don't change during a test suite run.
 static VALUE get_const_refs_for_file(VALUE filename) {
   VALUE const_refs_hash =
-      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")));
+      rb_hash_lookup(fast_cov_cache_hash, fast_cov_cache_key_const_refs);
 
   // Cache hit: return cached refs
   VALUE cached = rb_hash_lookup(const_refs_hash, filename);
@@ -275,8 +285,7 @@ static VALUE safely_resolve_const_value(VALUE const_name_str) {
 
 static VALUE get_const_ancestor_files(VALUE const_name_str) {
   VALUE const_ancestor_files_hash =
-      rb_hash_lookup(fast_cov_cache_hash,
-                     ID2SYM(rb_intern("const_ancestor_files")));
+      rb_hash_lookup(fast_cov_cache_hash, fast_cov_cache_key_const_ancestor_files);
 
   VALUE cached = rb_hash_lookup(const_ancestor_files_hash, const_name_str);
   if (cached != Qnil) {
@@ -307,6 +316,11 @@ static VALUE get_const_ancestor_files(VALUE const_name_str) {
   for (long i = 0; i < len; i++) {
     VALUE ancestor = rb_ary_entry(ancestors, i);
     if (NIL_P(ancestor)) {
+      continue;
+    }
+    if (ancestor == rb_cObject || ancestor == rb_mKernel ||
+        ancestor == rb_cBasicObject || ancestor == rb_cModule ||
+        ancestor == rb_cClass) {
       continue;
     }
 
@@ -490,11 +504,9 @@ static VALUE cache_set_data(VALUE self, VALUE new_cache) {
 
 static VALUE cache_clear(VALUE self) {
   rb_funcall(fast_cov_cache_hash, id_clear, 0);
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
-               rb_hash_new());
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
-               rb_hash_new());
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_ancestor_files")),
+  rb_hash_aset(fast_cov_cache_hash, fast_cov_cache_key_const_refs, rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, fast_cov_cache_key_const_locations, rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, fast_cov_cache_key_const_ancestor_files,
                rb_hash_new());
   return Qnil;
 }
@@ -507,32 +519,28 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   if (NIL_P(opt)) opt = rb_hash_new();
 
   // root: defaults to Dir.pwd
-  VALUE rb_root = rb_hash_lookup(opt, ID2SYM(rb_intern("root")));
+  VALUE rb_root = rb_hash_lookup(opt, sym_root);
   if (!RTEST(rb_root)) {
     rb_root = rb_funcall(rb_cDir, rb_intern("pwd"), 0);
   }
 
   // ignored_path: optional, nil if not provided
-  VALUE rb_ignored_path =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_path")));
+  VALUE rb_ignored_path = rb_hash_lookup(opt, sym_ignored_path);
 
   // threads: true (multi) or false (single), defaults to true
-  VALUE rb_threads = rb_hash_lookup(opt, ID2SYM(rb_intern("threads")));
+  VALUE rb_threads = rb_hash_lookup(opt, sym_threads);
   bool threads = (rb_threads != Qfalse);
 
   // constant_references: defaults to true
-  VALUE rb_const_refs =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("constant_references")));
+  VALUE rb_const_refs = rb_hash_lookup(opt, sym_constant_references);
   bool constant_references = (rb_const_refs != Qfalse);
 
   // ancestor_references: defaults to true
-  VALUE rb_ancestor_refs =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("ancestor_references")));
+  VALUE rb_ancestor_refs = rb_hash_lookup(opt, sym_ancestor_references);
   bool ancestor_references = (rb_ancestor_refs != Qfalse);
 
   // allocations: defaults to true
-  VALUE rb_allocations =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("allocations")));
+  VALUE rb_allocations = rb_hash_lookup(opt, sym_allocations);
   bool allocations = (rb_allocations != Qfalse);
 
   struct fast_cov_data *data;
@@ -632,17 +640,27 @@ void Init_fast_cov(void) {
   id_keys = rb_intern("keys");
   id_clear = rb_intern("clear");
   id_merge_bang = rb_intern("merge!");
+  fast_cov_id_const_source_location = rb_intern("const_source_location");
+  fast_cov_cache_key_const_refs = ID2SYM(rb_intern("const_refs"));
+  fast_cov_cache_key_const_locations = ID2SYM(rb_intern("const_locations"));
+  fast_cov_cache_key_const_ancestor_files =
+      ID2SYM(rb_intern("const_ancestor_files"));
+  sym_root = ID2SYM(rb_intern("root"));
+  sym_ignored_path = ID2SYM(rb_intern("ignored_path"));
+  sym_threads = ID2SYM(rb_intern("threads"));
+  sym_constant_references = ID2SYM(rb_intern("constant_references"));
+  sym_ancestor_references = ID2SYM(rb_intern("ancestor_references"));
+  sym_allocations = ID2SYM(rb_intern("allocations"));
 
   rb_require("fast_cov/constant_extractor");
 
   // Initialize process-level cache
   fast_cov_cache_hash = rb_hash_new();
   rb_gc_register_address(&fast_cov_cache_hash);
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
+  rb_hash_aset(fast_cov_cache_hash, fast_cov_cache_key_const_refs, rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, fast_cov_cache_key_const_locations,
                rb_hash_new());
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
-               rb_hash_new());
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_ancestor_files")),
+  rb_hash_aset(fast_cov_cache_hash, fast_cov_cache_key_const_ancestor_files,
                rb_hash_new());
 
   VALUE mFastCov = rb_define_module("FastCov");
