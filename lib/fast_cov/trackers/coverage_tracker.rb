@@ -5,7 +5,7 @@ module FastCov
   # Handles line coverage, allocation tracing, and constant resolution.
   #
   # Register via: config.use FastCov::CoverageTracker
-  # Options: root, ignored_path, threads, constant_references, allocations
+  # Options: root, ignored_path, threads, constant_references, ancestor_references, allocations
   class CoverageTracker
     def initialize(config, **options)
       @coverage = Coverage.new(
@@ -13,6 +13,7 @@ module FastCov
         ignored_path: options.fetch(:ignored_path, config.ignored_path),
         threads: options.fetch(:threads, config.threads),
         constant_references: options.fetch(:constant_references, true),
+        ancestor_references: options.fetch(:ancestor_references, true),
         allocations: options.fetch(:allocations, true)
       )
     end

@@ -13,6 +13,7 @@
 // Ruby VM events. Designed for test impact analysis.
 
 #define MAX_CONST_RESOLUTION_ROUNDS 10
+#define MAX_ANCESTORS_PER_CONST 64
 
 // threads: true = multi-threaded (global hook), false = single-threaded (per-thread hook)
 
@@ -50,6 +51,7 @@ struct fast_cov_data {
 
   bool threads;
   bool constant_references;
+  bool ancestor_references;
   bool allocations;
   VALUE th_covered;
 
@@ -112,6 +114,7 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->last_filename_ptr = 0;
   data->threads = true;
   data->constant_references = true;
+  data->ancestor_references = true;
   data->allocations = true;
   data->klasses_table = st_init_numtable();
 
@@ -262,6 +265,78 @@ static VALUE get_const_refs_for_file(VALUE filename) {
   return const_names;
 }
 
+static VALUE resolve_const_value_body(VALUE const_name_str) {
+  return rb_path_to_class(const_name_str);
+}
+
+static VALUE safely_resolve_const_value(VALUE const_name_str) {
+  return fast_cov_rescue_nil(resolve_const_value_body, const_name_str);
+}
+
+static VALUE get_const_ancestor_files(VALUE const_name_str) {
+  VALUE const_ancestor_files_hash =
+      rb_hash_lookup(fast_cov_cache_hash,
+                     ID2SYM(rb_intern("const_ancestor_files")));
+
+  VALUE cached = rb_hash_lookup(const_ancestor_files_hash, const_name_str);
+  if (cached != Qnil) {
+    return cached;
+  }
+
+  VALUE files = rb_ary_new();
+  VALUE seen_const_names = rb_hash_new();
+  VALUE seen_files = rb_hash_new();
+
+  VALUE const_value = safely_resolve_const_value(const_name_str);
+  if (!(RB_TYPE_P(const_value, T_CLASS) || RB_TYPE_P(const_value, T_MODULE))) {
+    rb_hash_aset(const_ancestor_files_hash, const_name_str, files);
+    return files;
+  }
+
+  VALUE ancestors = fast_cov_rescue_nil(rb_mod_ancestors, const_value);
+  if (NIL_P(ancestors) || !RB_TYPE_P(ancestors, T_ARRAY)) {
+    rb_hash_aset(const_ancestor_files_hash, const_name_str, files);
+    return files;
+  }
+
+  long len = RARRAY_LEN(ancestors);
+  if (len > MAX_ANCESTORS_PER_CONST) {
+    len = MAX_ANCESTORS_PER_CONST;
+  }
+
+  for (long i = 0; i < len; i++) {
+    VALUE ancestor = rb_ary_entry(ancestors, i);
+    if (NIL_P(ancestor)) {
+      continue;
+    }
+
+    VALUE ancestor_name = fast_cov_rescue_nil(rb_mod_name, ancestor);
+    if (NIL_P(ancestor_name) || !RB_TYPE_P(ancestor_name, T_STRING)) {
+      continue;
+    }
+
+    if (rb_hash_lookup(seen_const_names, ancestor_name) != Qnil) {
+      continue;
+    }
+    rb_hash_aset(seen_const_names, ancestor_name, Qtrue);
+
+    VALUE ancestor_file = fast_cov_resolve_const_to_file(ancestor_name);
+    if (NIL_P(ancestor_file) || !RB_TYPE_P(ancestor_file, T_STRING)) {
+      continue;
+    }
+
+    if (rb_hash_lookup(seen_files, ancestor_file) != Qnil) {
+      continue;
+    }
+    rb_hash_aset(seen_files, ancestor_file, Qtrue);
+
+    rb_ary_push(files, ancestor_file);
+  }
+
+  rb_hash_aset(const_ancestor_files_hash, const_name_str, files);
+  return files;
+}
+
 static void resolve_constant_references(struct fast_cov_data *data) {
   VALUE seen_consts = rb_hash_new();
   VALUE processed_files = rb_hash_new();
@@ -300,6 +375,22 @@ static void resolve_constant_references(struct fast_cov_data *data) {
 
         if (record_impacted_file(data, resolved_file)) {
           found_new_file = 1;
+        }
+
+        if (data->ancestor_references) {
+          VALUE ancestor_files = get_const_ancestor_files(const_name);
+          if (RB_TYPE_P(ancestor_files, T_ARRAY)) {
+            long num_ancestor_files = RARRAY_LEN(ancestor_files);
+            for (long k = 0; k < num_ancestor_files; k++) {
+              VALUE ancestor_file = rb_ary_entry(ancestor_files, k);
+              if (NIL_P(ancestor_file) || !RB_TYPE_P(ancestor_file, T_STRING)) {
+                continue;
+              }
+              if (record_impacted_file(data, ancestor_file)) {
+                found_new_file = 1;
+              }
+            }
+          }
         }
       }
     }
@@ -403,6 +494,8 @@ static VALUE cache_clear(VALUE self) {
                rb_hash_new());
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
                rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_ancestor_files")),
+               rb_hash_new());
   return Qnil;
 }
 
@@ -432,6 +525,11 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
       rb_hash_lookup(opt, ID2SYM(rb_intern("constant_references")));
   bool constant_references = (rb_const_refs != Qfalse);
 
+  // ancestor_references: defaults to true
+  VALUE rb_ancestor_refs =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("ancestor_references")));
+  bool ancestor_references = (rb_ancestor_refs != Qfalse);
+
   // allocations: defaults to true
   VALUE rb_allocations =
       rb_hash_lookup(opt, ID2SYM(rb_intern("allocations")));
@@ -442,6 +540,7 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
 
   data->threads = threads;
   data->constant_references = constant_references;
+  data->ancestor_references = ancestor_references;
   data->allocations = allocations;
   data->root_len = RSTRING_LEN(rb_root);
   data->root =
@@ -542,6 +641,8 @@ void Init_fast_cov(void) {
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
                rb_hash_new());
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
+               rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_ancestor_files")),
                rb_hash_new());
 
   VALUE mFastCov = rb_define_module("FastCov");
