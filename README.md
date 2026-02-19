@@ -125,7 +125,7 @@ config.use FastCov::CoverageTracker
 | `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
 | `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 | `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
-| `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. |
+| `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. `true` uses nesting-aware expansion; `false` disables constant parsing. |
 
 #### What it tracks
 
@@ -133,7 +133,7 @@ config.use FastCov::CoverageTracker
 
 **Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
 
-**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
+**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references. Bare constants are expanded with lexical nesting candidates (for example `Foo` inside `module A; class B` also tries `A::B::Foo` and `A::Foo`), then each candidate is resolved via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
 
 #### Disabling expensive features
 

@@ -4,25 +4,12 @@ require "prism"
 
 module FastCov
   # Extracts constant references from Ruby source files using Prism.
-  #
-  # Supports two modes:
-  # - :simple - extracts constants as-is (e.g., `Foo` -> ["Foo"])
-  # - :expanded - expands bare constants with all possible nesting resolutions
-  #   (e.g., `Foo` inside `module A; class B` -> ["Foo", "B::Foo", "A::B::Foo", "A::Foo"])
   module ConstantExtractor
-    def self.extract(filename, mode = :expanded)
+    def self.extract(filename)
       result = Prism.parse_file(filename)
       constants = []
-
-      case mode
-      when :simple
-        collect_constants_simple(result.value, constants)
-      when :expanded
-        collect_constants_expanded(result.value, constants, [])
-        constants.uniq!
-      else
-        raise ArgumentError, "Unknown mode: #{mode.inspect}. Use :simple or :expanded"
-      end
+      seen = {}
+      collect_constants_expanded(result.value, constants, seen, [])
 
       constants
     end
@@ -30,87 +17,86 @@ module FastCov
     class << self
       private
 
-      # Simple mode: extract constants without nesting expansion
-      def collect_constants_simple(node, constants)
-        case node
-        when Prism::ConstantPathNode
-          path = resolve_constant_path(node)
-          if path
-            constants << path.delete_prefix("::")
-            return
-          end
-          # Dynamic parent (e.g., expr::Foo) — fall through to walk children
-        when Prism::ConstantReadNode
-          constants << node.name.to_s
-          return
-        end
-
-        node.compact_child_nodes.each { |child| collect_constants_simple(child, constants) }
-      end
-
       # Expanded mode: track nesting and expand bare constants
-      def collect_constants_expanded(node, constants, nesting)
+      def collect_constants_expanded(node, constants, seen, nesting_prefixes)
         case node
         when Prism::ModuleNode
           module_name = constant_name_for_nesting(node.constant_path)
-          new_nesting = module_name ? nesting + [module_name] : nesting
-          node.body&.compact_child_nodes&.each { |child| collect_constants_expanded(child, constants, new_nesting) }
+          next_prefixes = next_nesting_prefixes(nesting_prefixes, module_name)
+          node.body&.compact_child_nodes&.each do |child|
+            collect_constants_expanded(child, constants, seen, next_prefixes)
+          end
           return
 
         when Prism::ClassNode
           class_name = constant_name_for_nesting(node.constant_path)
-          new_nesting = class_name ? nesting + [class_name] : nesting
+          next_prefixes = next_nesting_prefixes(nesting_prefixes, class_name)
           # Superclass is a reference, add it
           if node.superclass
-            add_with_nesting(node.superclass, constants, nesting)
+            add_with_nesting(node.superclass, constants, seen, nesting_prefixes)
           end
-          node.body&.compact_child_nodes&.each { |child| collect_constants_expanded(child, constants, new_nesting) }
+          node.body&.compact_child_nodes&.each do |child|
+            collect_constants_expanded(child, constants, seen, next_prefixes)
+          end
           return
 
         when Prism::SingletonClassNode
           # class << self - nesting doesn't change
-          node.body&.compact_child_nodes&.each { |child| collect_constants_expanded(child, constants, nesting) }
+          node.body&.compact_child_nodes&.each do |child|
+            collect_constants_expanded(child, constants, seen, nesting_prefixes)
+          end
           return
 
         when Prism::ConstantPathNode
-          add_with_nesting(node, constants, nesting)
+          add_with_nesting(node, constants, seen, nesting_prefixes)
           return
 
         when Prism::ConstantReadNode
           # Bare constant - expand with all possible nestings
-          expand_with_nesting(node.name.to_s, constants, nesting)
+          expand_with_nesting(node.name.to_s, constants, seen, nesting_prefixes)
           return
         end
 
-        node.compact_child_nodes.each { |child| collect_constants_expanded(child, constants, nesting) }
-      end
-
-      def add_with_nesting(node, constants, nesting)
-        case node
-        when Prism::ConstantPathNode
-          path = resolve_constant_path(node)
-          if path
-            if path.start_with?("::")
-              # Absolute path like ::Foo::Bar - add without leading ::
-              constants << path[2..]
-            else
-              # Relative path like Foo::Bar - the first part gets nesting expansion
-              expand_with_nesting(path, constants, nesting)
-            end
-          end
-        when Prism::ConstantReadNode
-          expand_with_nesting(node.name.to_s, constants, nesting)
+        node.compact_child_nodes.each do |child|
+          collect_constants_expanded(child, constants, seen, nesting_prefixes)
         end
       end
 
-      def expand_with_nesting(const_name, constants, nesting)
+      def add_with_nesting(node, constants, seen, nesting_prefixes)
+        case node
+        when Prism::ConstantPathNode
+          path = resolve_constant_path(node)
+          return unless path
+
+          if path.start_with?("::")
+            # Absolute path like ::Foo::Bar - add without leading ::
+            add_unique(path.delete_prefix("::"), constants, seen)
+          else
+            # Relative path like Foo::Bar - the first part gets nesting expansion
+            expand_with_nesting(path, constants, seen, nesting_prefixes)
+          end
+        when Prism::ConstantReadNode
+          expand_with_nesting(node.name.to_s, constants, seen, nesting_prefixes)
+        end
+      end
+
+      def expand_with_nesting(const_name, constants, seen, nesting_prefixes)
         # Always add the constant as-is (could be top-level or fully qualified)
-        constants << const_name
+        add_unique(const_name, constants, seen)
 
         # Add with each level of nesting (from current to outermost)
-        nesting.size.times do |i|
-          prefix = nesting[0..-(i + 1)].join("::")
-          constants << "#{prefix}::#{const_name}"
+        nesting_prefixes.reverse_each do |prefix|
+          add_unique("#{prefix}::#{const_name}", constants, seen)
+        end
+      end
+
+      def next_nesting_prefixes(nesting_prefixes, nested_name)
+        return nesting_prefixes unless nested_name
+
+        if nesting_prefixes.empty?
+          [nested_name]
+        else
+          nesting_prefixes + ["#{nesting_prefixes[-1]}::#{nested_name}"]
         end
       end
 
@@ -118,10 +104,17 @@ module FastCov
       def constant_name_for_nesting(node)
         case node
         when Prism::ConstantPathNode
-          resolve_constant_path(node)
+          resolve_constant_path(node)&.delete_prefix("::")
         when Prism::ConstantReadNode
           node.name.to_s
         end
+      end
+
+      def add_unique(const_name, constants, seen)
+        return if seen[const_name]
+
+        seen[const_name] = true
+        constants << const_name
       end
 
       def resolve_constant_path(node)
