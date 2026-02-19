@@ -228,12 +228,12 @@ static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
 
 // ---- Constant reference resolution (cached) -----------------------------
 
-// Parse file with Prism and extract constant names.
-static VALUE extract_const_names_body(VALUE filename) {
+// Parse file with Prism and extract grouped constant candidates.
+static VALUE extract_const_reference_groups_body(VALUE filename) {
   return rb_funcall(cConstantExtractor, id_extract, 1, filename);
 }
 
-// Returns an array of constant name strings for a file, using the cache.
+// Returns an array of constant candidate groups for a file, using the cache.
 // Cache is keyed by filename only - once parsed, results are cached for
 // the lifetime of the process. No digest/mtime validation needed since
 // files don't change during a test suite run.
@@ -247,24 +247,39 @@ static VALUE get_const_refs_for_file(VALUE filename) {
     return cached;
   }
 
-  // Cache miss: parse with Prism and extract constant names
+  // Cache miss: parse with Prism and extract candidate groups
   int exception_state;
-  VALUE const_names =
-      rb_protect(extract_const_names_body, filename, &exception_state);
+  VALUE const_reference_groups =
+      rb_protect(extract_const_reference_groups_body, filename, &exception_state);
   if (exception_state != 0) {
     rb_set_errinfo(Qnil);
     return Qnil;
   }
 
   // Store in cache (filename -> refs)
-  rb_hash_aset(const_refs_hash, filename, const_names);
+  rb_hash_aset(const_refs_hash, filename, const_reference_groups);
 
-  return const_names;
+  return const_reference_groups;
+}
+
+// Resolve constant to file with a run-local cache for both hits and misses.
+// Misses are stored as Qfalse so we don't retry unresolved constants.
+static VALUE resolve_const_to_file_cached(VALUE const_name, VALUE resolution_cache) {
+  VALUE cached = rb_hash_lookup(resolution_cache, const_name);
+  if (cached != Qnil) {
+    return cached == Qfalse ? Qnil : cached;
+  }
+
+  VALUE resolved_file = fast_cov_resolve_const_to_file(const_name);
+  rb_hash_aset(resolution_cache, const_name,
+               NIL_P(resolved_file) ? Qfalse : resolved_file);
+
+  return resolved_file;
 }
 
 static void resolve_constant_references(struct fast_cov_data *data) {
-  VALUE seen_consts = rb_hash_new();
   VALUE processed_files = rb_hash_new();
+  VALUE resolution_cache = rb_hash_new();
 
   for (int round = 0; round < MAX_CONST_RESOLUTION_ROUNDS; round++) {
     VALUE keys = rb_funcall(data->impacted_files, id_keys, 0);
@@ -279,21 +294,45 @@ static void resolve_constant_references(struct fast_cov_data *data) {
       }
       rb_hash_aset(processed_files, filename, Qtrue);
 
-      VALUE const_names = get_const_refs_for_file(filename);
-      if (NIL_P(const_names) || !RB_TYPE_P(const_names, T_ARRAY)) {
+      VALUE const_reference_groups = get_const_refs_for_file(filename);
+      if (NIL_P(const_reference_groups) || !RB_TYPE_P(const_reference_groups, T_ARRAY)) {
         continue;
       }
 
-      long num_refs = RARRAY_LEN(const_names);
+      long num_refs = RARRAY_LEN(const_reference_groups);
       for (long j = 0; j < num_refs; j++) {
-        VALUE const_name = rb_ary_entry(const_names, j);
+        VALUE reference = rb_ary_entry(const_reference_groups, j);
 
-        if (rb_hash_lookup(seen_consts, const_name) != Qnil) {
+        // New format: array of candidates ordered most-specific -> least-specific.
+        if (RB_TYPE_P(reference, T_ARRAY)) {
+          long num_candidates = RARRAY_LEN(reference);
+          for (long c = 0; c < num_candidates; c++) {
+            VALUE const_name = rb_ary_entry(reference, c);
+            if (!RB_TYPE_P(const_name, T_STRING)) {
+              continue;
+            }
+
+            VALUE resolved_file =
+                resolve_const_to_file_cached(const_name, resolution_cache);
+            if (NIL_P(resolved_file)) {
+              continue;
+            }
+
+            if (record_impacted_file(data, resolved_file)) {
+              found_new_file = 1;
+            }
+            // Short-circuit this reference at first successful match.
+            break;
+          }
           continue;
         }
-        rb_hash_aset(seen_consts, const_name, Qtrue);
 
-        VALUE resolved_file = fast_cov_resolve_const_to_file(const_name);
+        // Backward-compat: old format where each entry is a constant string.
+        if (!RB_TYPE_P(reference, T_STRING)) {
+          continue;
+        }
+
+        VALUE resolved_file = resolve_const_to_file_cached(reference, resolution_cache);
         if (NIL_P(resolved_file)) {
           continue;
         }

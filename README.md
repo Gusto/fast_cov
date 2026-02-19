@@ -133,7 +133,7 @@ config.use FastCov::CoverageTracker
 
 **Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
 
-**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references. Bare constants are expanded with lexical nesting candidates (for example `Foo` inside `module A; class B` also tries `A::B::Foo` and `A::Foo`), then each candidate is resolved via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
+**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references. Bare constants are expanded with lexical nesting candidates (for example `Foo` inside `module A; class B` tries `A::B::Foo`, then `A::Foo`, then `Foo`). Candidates are resolved via `Object.const_source_location` in most-specific-to-least-specific order, and each reference short-circuits at the first successful match. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
 
 #### Disabling expensive features
 
