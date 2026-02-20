@@ -23,6 +23,8 @@ char *fast_cov_ruby_strndup(const char *str, size_t size);
 
 VALUE fast_cov_rescue_nil(VALUE (*fn)(VALUE), VALUE arg);
 
+VALUE fast_cov_share_string(VALUE str);
+
 VALUE fast_cov_get_const_source_location(VALUE const_name_str);
 
 VALUE fast_cov_safely_get_const_source_location(VALUE const_name_str);

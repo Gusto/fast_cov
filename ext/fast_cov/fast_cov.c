@@ -25,6 +25,7 @@ static ID id_keys;
 VALUE fast_cov_cache_hash; // process-level cache (non-static for access from utils)
 static ID id_clear;
 static ID id_merge_bang;
+static VALUE fast_cov_empty_frozen_array;
 
 // Forward declarations
 static VALUE fast_cov_stop(VALUE self);
@@ -33,6 +34,16 @@ static int mark_key_for_gc_i(st_data_t key, st_data_t _value,
                               st_data_t _data) {
   rb_gc_mark((VALUE)key);
   return ST_CONTINUE;
+}
+
+static VALUE get_or_init_cache_bucket(const char *bucket_name) {
+  VALUE key = ID2SYM(rb_intern(bucket_name));
+  VALUE bucket = rb_hash_lookup(fast_cov_cache_hash, key);
+  if (!RB_TYPE_P(bucket, T_HASH)) {
+    bucket = rb_hash_new();
+    rb_hash_aset(fast_cov_cache_hash, key, bucket);
+  }
+  return bucket;
 }
 
 // ---- Data structure -----------------------------------------------------
@@ -51,6 +62,7 @@ struct fast_cov_data {
   bool threads;
   bool constant_references;
   bool allocations;
+  bool started;
   VALUE th_covered;
 
   VALUE object_allocation_tracepoint;
@@ -113,6 +125,7 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->threads = true;
   data->constant_references = true;
   data->allocations = true;
+  data->started = false;
   data->klasses_table = st_init_numtable();
 
   return obj;
@@ -120,15 +133,34 @@ static VALUE fast_cov_allocate(VALUE klass) {
 
 // ---- Internal helpers ---------------------------------------------------
 
-static bool record_impacted_file(struct fast_cov_data *data, VALUE filename) {
+static bool record_impacted_file_internal(struct fast_cov_data *data,
+                                          VALUE filename,
+                                          bool only_if_new) {
+  if (!RB_TYPE_P(filename, T_STRING)) {
+    return false;
+  }
+
   if (!fast_cov_is_path_included(RSTRING_PTR(filename), data->root,
                                  data->root_len, data->ignored_path,
                                  data->ignored_path_len)) {
     return false;
   }
 
-  rb_hash_aset(data->impacted_files, filename, Qtrue);
+  VALUE shared_filename = fast_cov_share_string(filename);
+  if (only_if_new &&
+      rb_hash_lookup(data->impacted_files, shared_filename) != Qnil) {
+    return false;
+  }
+  rb_hash_aset(data->impacted_files, shared_filename, Qtrue);
   return true;
+}
+
+static bool record_impacted_file(struct fast_cov_data *data, VALUE filename) {
+  return record_impacted_file_internal(data, filename, false);
+}
+
+static bool record_new_impacted_file(struct fast_cov_data *data, VALUE filename) {
+  return record_impacted_file_internal(data, filename, true);
 }
 
 // ---- Line event callback ------------------------------------------------
@@ -238,11 +270,11 @@ static VALUE extract_const_reference_groups_body(VALUE filename) {
 // the lifetime of the process. No digest/mtime validation needed since
 // files don't change during a test suite run.
 static VALUE get_const_refs_for_file(VALUE filename) {
-  VALUE const_refs_hash =
-      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")));
+  VALUE shared_filename = fast_cov_share_string(filename);
+  VALUE const_refs_hash = get_or_init_cache_bucket("const_refs");
 
   // Cache hit: return cached refs
-  VALUE cached = rb_hash_lookup(const_refs_hash, filename);
+  VALUE cached = rb_hash_lookup(const_refs_hash, shared_filename);
   if (cached != Qnil) {
     return cached;
   }
@@ -250,14 +282,36 @@ static VALUE get_const_refs_for_file(VALUE filename) {
   // Cache miss: parse with Prism and extract candidate groups
   int exception_state;
   VALUE const_reference_groups =
-      rb_protect(extract_const_reference_groups_body, filename, &exception_state);
+      rb_protect(extract_const_reference_groups_body, shared_filename, &exception_state);
   if (exception_state != 0) {
     rb_set_errinfo(Qnil);
     return Qnil;
   }
 
+  if (RB_TYPE_P(const_reference_groups, T_ARRAY)) {
+    long num_refs = RARRAY_LEN(const_reference_groups);
+    for (long i = 0; i < num_refs; i++) {
+      VALUE reference = rb_ary_entry(const_reference_groups, i);
+
+      if (RB_TYPE_P(reference, T_ARRAY)) {
+        long num_candidates = RARRAY_LEN(reference);
+        for (long j = 0; j < num_candidates; j++) {
+          VALUE const_name = rb_ary_entry(reference, j);
+          if (!RB_TYPE_P(const_name, T_STRING)) {
+            continue;
+          }
+          rb_ary_store(reference, j, fast_cov_share_string(const_name));
+        }
+        rb_obj_freeze(reference);
+      } else if (RB_TYPE_P(reference, T_STRING)) {
+        rb_ary_store(const_reference_groups, i, fast_cov_share_string(reference));
+      }
+    }
+    rb_obj_freeze(const_reference_groups);
+  }
+
   // Store in cache (filename -> refs)
-  rb_hash_aset(const_refs_hash, filename, const_reference_groups);
+  rb_hash_aset(const_refs_hash, shared_filename, const_reference_groups);
 
   return const_reference_groups;
 }
@@ -265,16 +319,90 @@ static VALUE get_const_refs_for_file(VALUE filename) {
 // Resolve constant to file with a run-local cache for both hits and misses.
 // Misses are stored as Qfalse so we don't retry unresolved constants.
 static VALUE resolve_const_to_file_cached(VALUE const_name, VALUE resolution_cache) {
-  VALUE cached = rb_hash_lookup(resolution_cache, const_name);
+  VALUE shared_const_name = fast_cov_share_string(const_name);
+  VALUE cached = rb_hash_lookup(resolution_cache, shared_const_name);
   if (cached != Qnil) {
     return cached == Qfalse ? Qnil : cached;
   }
 
-  VALUE resolved_file = fast_cov_resolve_const_to_file(const_name);
-  rb_hash_aset(resolution_cache, const_name,
+  VALUE resolved_file = fast_cov_resolve_const_to_file(shared_const_name);
+  rb_hash_aset(resolution_cache, shared_const_name,
                NIL_P(resolved_file) ? Qfalse : resolved_file);
 
   return resolved_file;
+}
+
+// Resolve one reference group (ordered candidates) to the first matching file.
+// Supports:
+// - New format: array of candidates ordered most-specific -> least-specific.
+// - Legacy format: single constant string.
+static VALUE resolve_reference_group_to_file(VALUE reference,
+                                             VALUE resolution_cache) {
+  if (RB_TYPE_P(reference, T_ARRAY)) {
+    long num_candidates = RARRAY_LEN(reference);
+    for (long i = 0; i < num_candidates; i++) {
+      VALUE const_name = rb_ary_entry(reference, i);
+      if (!RB_TYPE_P(const_name, T_STRING)) {
+        continue;
+      }
+
+      VALUE resolved_file = resolve_const_to_file_cached(const_name,
+                                                         resolution_cache);
+      if (!NIL_P(resolved_file)) {
+        return resolved_file;
+      }
+    }
+    return Qnil;
+  }
+
+  if (RB_TYPE_P(reference, T_STRING)) {
+    return resolve_const_to_file_cached(reference, resolution_cache);
+  }
+
+  return Qnil;
+}
+
+// Resolve all references in a source file to concrete dependency files.
+// Result is cached in :const_ref_files as filename -> [resolved_file, ...].
+static VALUE get_resolved_const_files_for_file(VALUE filename,
+                                               VALUE resolution_cache) {
+  VALUE shared_filename = fast_cov_share_string(filename);
+  VALUE const_ref_files_hash = get_or_init_cache_bucket("const_ref_files");
+
+  VALUE cached = rb_hash_lookup(const_ref_files_hash, shared_filename);
+  if (cached != Qnil) {
+    return cached;
+  }
+
+  VALUE const_reference_groups = get_const_refs_for_file(shared_filename);
+  if (NIL_P(const_reference_groups) || !RB_TYPE_P(const_reference_groups, T_ARRAY)) {
+    rb_hash_aset(const_ref_files_hash, shared_filename, fast_cov_empty_frozen_array);
+    return fast_cov_empty_frozen_array;
+  }
+
+  VALUE resolved_files = rb_ary_new();
+  VALUE seen_files = rb_hash_new();
+
+  long num_refs = RARRAY_LEN(const_reference_groups);
+  for (long j = 0; j < num_refs; j++) {
+    VALUE reference = rb_ary_entry(const_reference_groups, j);
+    VALUE resolved_file = resolve_reference_group_to_file(reference,
+                                                          resolution_cache);
+    if (NIL_P(resolved_file)) {
+      continue;
+    }
+    resolved_file = fast_cov_share_string(resolved_file);
+    if (rb_hash_lookup(seen_files, resolved_file) != Qnil) {
+      continue;
+    }
+
+    rb_hash_aset(seen_files, resolved_file, Qtrue);
+    rb_ary_push(resolved_files, resolved_file);
+  }
+
+  rb_hash_aset(const_ref_files_hash, shared_filename, resolved_files);
+  rb_obj_freeze(resolved_files);
+  return resolved_files;
 }
 
 static void resolve_constant_references(struct fast_cov_data *data) {
@@ -294,50 +422,19 @@ static void resolve_constant_references(struct fast_cov_data *data) {
       }
       rb_hash_aset(processed_files, filename, Qtrue);
 
-      VALUE const_reference_groups = get_const_refs_for_file(filename);
-      if (NIL_P(const_reference_groups) || !RB_TYPE_P(const_reference_groups, T_ARRAY)) {
+      VALUE resolved_files = get_resolved_const_files_for_file(filename,
+                                                               resolution_cache);
+      if (NIL_P(resolved_files) || !RB_TYPE_P(resolved_files, T_ARRAY)) {
         continue;
       }
 
-      long num_refs = RARRAY_LEN(const_reference_groups);
-      for (long j = 0; j < num_refs; j++) {
-        VALUE reference = rb_ary_entry(const_reference_groups, j);
-
-        // New format: array of candidates ordered most-specific -> least-specific.
-        if (RB_TYPE_P(reference, T_ARRAY)) {
-          long num_candidates = RARRAY_LEN(reference);
-          for (long c = 0; c < num_candidates; c++) {
-            VALUE const_name = rb_ary_entry(reference, c);
-            if (!RB_TYPE_P(const_name, T_STRING)) {
-              continue;
-            }
-
-            VALUE resolved_file =
-                resolve_const_to_file_cached(const_name, resolution_cache);
-            if (NIL_P(resolved_file)) {
-              continue;
-            }
-
-            if (record_impacted_file(data, resolved_file)) {
-              found_new_file = 1;
-            }
-            // Short-circuit this reference at first successful match.
-            break;
-          }
+      long num_resolved_files = RARRAY_LEN(resolved_files);
+      for (long j = 0; j < num_resolved_files; j++) {
+        VALUE resolved_file = rb_ary_entry(resolved_files, j);
+        if (!RB_TYPE_P(resolved_file, T_STRING)) {
           continue;
         }
-
-        // Backward-compat: old format where each entry is a constant string.
-        if (!RB_TYPE_P(reference, T_STRING)) {
-          continue;
-        }
-
-        VALUE resolved_file = resolve_const_to_file_cached(reference, resolution_cache);
-        if (NIL_P(resolved_file)) {
-          continue;
-        }
-
-        if (record_impacted_file(data, resolved_file)) {
+        if (record_new_impacted_file(data, resolved_file)) {
           found_new_file = 1;
         }
       }
@@ -440,6 +537,8 @@ static VALUE cache_clear(VALUE self) {
   rb_funcall(fast_cov_cache_hash, id_clear, 0);
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
                rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_ref_files")),
+               rb_hash_new());
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
                rb_hash_new());
   return Qnil;
@@ -479,6 +578,18 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
+  if (data->root) {
+    xfree(data->root);
+    data->root = NULL;
+    data->root_len = 0;
+  }
+  if (data->ignored_path) {
+    xfree(data->ignored_path);
+    data->ignored_path = NULL;
+    data->ignored_path_len = 0;
+  }
+  data->started = false;
+
   data->threads = threads;
   data->constant_references = constant_references;
   data->allocations = allocations;
@@ -492,9 +603,15 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
                                                data->ignored_path_len);
   }
 
-  if (allocations) {
-    data->object_allocation_tracepoint = rb_tracepoint_new(
-        Qnil, RUBY_INTERNAL_EVENT_NEWOBJ, on_newobj_event, (void *)data);
+  if (!allocations) {
+    if (data->object_allocation_tracepoint != Qnil) {
+      rb_tracepoint_disable(data->object_allocation_tracepoint);
+      data->object_allocation_tracepoint = Qnil;
+    }
+  } else if (data->object_allocation_tracepoint == Qnil) {
+    data->object_allocation_tracepoint =
+        rb_tracepoint_new(Qnil, RUBY_INTERNAL_EVENT_NEWOBJ, on_newobj_event,
+                          (void *)data);
   }
 
   return Qnil;
@@ -508,15 +625,18 @@ static VALUE fast_cov_start(VALUE self) {
     rb_raise(rb_eRuntimeError, "root is required");
   }
 
-  if (!data->threads) {
-    VALUE thval = rb_thread_current();
-    rb_thread_add_event_hook(thval, on_line_event, RUBY_EVENT_LINE, self);
-    data->th_covered = thval;
-  } else {
-    rb_add_event_hook(on_line_event, RUBY_EVENT_LINE, self);
+  if (!data->started) {
+    if (!data->threads) {
+      VALUE thval = rb_thread_current();
+      rb_thread_add_event_hook(thval, on_line_event, RUBY_EVENT_LINE, self);
+      data->th_covered = thval;
+    } else {
+      rb_add_event_hook(on_line_event, RUBY_EVENT_LINE, self);
+    }
+    data->started = true;
   }
 
-  if (data->object_allocation_tracepoint != Qnil) {
+  if (data->started && data->object_allocation_tracepoint != Qnil) {
     rb_tracepoint_enable(data->object_allocation_tracepoint);
   }
 
@@ -533,28 +653,32 @@ static VALUE fast_cov_stop(VALUE self) {
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
-  if (!data->threads) {
-    VALUE thval = rb_thread_current();
-    if (thval != data->th_covered) {
-      rb_raise(rb_eRuntimeError, "Coverage was not started by this thread");
+  if (data->started) {
+    if (!data->threads) {
+      VALUE thval = rb_thread_current();
+      if (thval != data->th_covered) {
+        rb_raise(rb_eRuntimeError, "Coverage was not started by this thread");
+      }
+      rb_thread_remove_event_hook(data->th_covered, on_line_event);
+      data->th_covered = Qnil;
+    } else {
+      rb_remove_event_hook(on_line_event);
     }
-    rb_thread_remove_event_hook(data->th_covered, on_line_event);
-    data->th_covered = Qnil;
-  } else {
-    rb_remove_event_hook(on_line_event);
-  }
 
-  if (data->object_allocation_tracepoint != Qnil) {
-    rb_tracepoint_disable(data->object_allocation_tracepoint);
-  }
+    if (data->object_allocation_tracepoint != Qnil) {
+      rb_tracepoint_disable(data->object_allocation_tracepoint);
+    }
 
-  if (data->allocations) {
-    st_foreach(data->klasses_table, each_instantiated_klass, (st_data_t)data);
-    st_clear(data->klasses_table);
-  }
+    if (data->allocations) {
+      st_foreach(data->klasses_table, each_instantiated_klass, (st_data_t)data);
+      st_clear(data->klasses_table);
+    }
 
-  if (data->constant_references) {
-    resolve_constant_references(data);
+    if (data->constant_references) {
+      resolve_constant_references(data);
+    }
+
+    data->started = false;
   }
 
   VALUE res = data->impacted_files;
@@ -578,7 +702,12 @@ void Init_fast_cov(void) {
   // Initialize process-level cache
   fast_cov_cache_hash = rb_hash_new();
   rb_gc_register_address(&fast_cov_cache_hash);
+  fast_cov_empty_frozen_array = rb_ary_new();
+  rb_obj_freeze(fast_cov_empty_frozen_array);
+  rb_gc_register_address(&fast_cov_empty_frozen_array);
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
+               rb_hash_new());
+  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_ref_files")),
                rb_hash_new());
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
                rb_hash_new());
