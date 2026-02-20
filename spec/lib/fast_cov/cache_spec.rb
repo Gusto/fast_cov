@@ -9,6 +9,7 @@ RSpec.describe FastCov::Cache do
     it "returns the in-memory cache hash" do
       expect(FastCov::Cache.data).to be_a(Hash)
       expect(FastCov::Cache.data).to have_key(:const_refs)
+      expect(FastCov::Cache.data).to have_key(:const_ref_files)
       expect(FastCov::Cache.data).to have_key(:const_locations)
     end
   end
@@ -22,6 +23,20 @@ RSpec.describe FastCov::Cache do
       FastCov::Cache.data = { const_refs: { "/fake.rb" => { digest: "x", refs: ["Foo"] } } }
       expect(FastCov::Cache.data[:const_refs]).to have_key("/fake.rb")
     end
+
+    it "handles legacy cache payloads missing newer buckets" do
+      FastCov::Cache.data = { const_refs: {}, const_locations: {} }
+
+      cov.start
+      ConstantReader.new.operations
+      result = cov.stop
+
+      expect(result).to include(
+        fixtures_path("calculator/operations/constant_reader.rb"),
+        fixtures_path("calculator/constants.rb")
+      )
+      expect(FastCov::Cache.data[:const_ref_files]).to be_a(Hash)
+    end
   end
 
   describe ".clear" do
@@ -31,10 +46,13 @@ RSpec.describe FastCov::Cache do
       cov.stop
 
       expect(FastCov::Cache.data[:const_refs]).not_to be_empty
+      expect(FastCov::Cache.data[:const_ref_files]).not_to be_empty
 
       FastCov::Cache.clear
 
       expect(FastCov::Cache.data[:const_refs]).to be_empty
+      expect(FastCov::Cache.data[:const_ref_files]).to be_empty
+      expect(FastCov::Cache.data[:const_locations]).to be_empty
     end
   end
 end

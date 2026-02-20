@@ -125,7 +125,7 @@ config.use FastCov::CoverageTracker
 | `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
 | `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 | `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
-| `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. |
+| `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. `true` uses nesting-aware expansion; `false` disables constant parsing. |
 
 #### What it tracks
 
@@ -133,7 +133,7 @@ config.use FastCov::CoverageTracker
 
 **Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
 
-**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
+**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references. Bare constants are expanded with lexical nesting candidates (for example `Foo` inside `module A; class B` tries `A::B::Foo`, then `A::Foo`, then `Foo`). Candidates are resolved via `Object.const_source_location` in most-specific-to-least-specific order, and each reference short-circuits at the first successful match. Resolution is transitive (up to 10 rounds). FastCov caches both parsed references (`file -> constant candidates`) and resolved outcomes (`file -> dependency files`) for the lifetime of the process.
 
 #### Disabling expensive features
 
@@ -323,7 +323,13 @@ Results from all trackers are merged, with later trackers overwriting earlier on
 
 ## Cache
 
-FastCov caches constant reference resolution results in memory so files only need parsing once per process. The cache is process-level, keyed by filename, and populated automatically during `stop`.
+FastCov caches constant reference resolution results in memory and populates caches automatically during `stop`:
+
+- `:const_refs` (`source_file -> constant candidate groups`)
+- `:const_ref_files` (`source_file -> resolved dependency files`)
+- `:const_locations` (`constant_name -> defining file`)
+
+Cached path strings are stored as deduplicated frozen Ruby fstrings to reduce memory growth across repeated runs.
 
 ```ruby
 FastCov::Cache.data      # the raw cache hash
