@@ -10,6 +10,7 @@ RSpec.describe FastCov::Cache do
       expect(FastCov::Cache.data).to be_a(Hash)
       expect(FastCov::Cache.data).to have_key(:const_refs)
       expect(FastCov::Cache.data).to have_key(:const_locations)
+      expect(FastCov::Cache.data).to have_key(:const_ancestor_files)
     end
   end
 
@@ -35,6 +36,7 @@ RSpec.describe FastCov::Cache do
       FastCov::Cache.clear
 
       expect(FastCov::Cache.data[:const_refs]).to be_empty
+      expect(FastCov::Cache.data[:const_ancestor_files]).to be_empty
     end
   end
 end

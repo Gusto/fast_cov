@@ -126,6 +126,7 @@ config.use FastCov::CoverageTracker
 | `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 | `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
 | `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. |
+| `ancestor_references` | Boolean | `true` | Also resolve ancestors of referenced constants (includes/modules/superclasses) to their defining files. |
 
 #### What it tracks
 
@@ -135,15 +136,17 @@ config.use FastCov::CoverageTracker
 
 **Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
 
+**Ancestor expansion** (`ancestor_references: true`) -- when a referenced constant resolves to a class or module, FastCov also resolves ancestor files (included modules, extended modules, and superclasses) and adds them to the impacted set. This helps map changes in shared concerns/mixins that may not execute line events in every test process.
+
 #### Disabling expensive features
 
 For maximum speed when you only need line-level file tracking:
 
 ```ruby
-config.use FastCov::CoverageTracker, allocations: false, constant_references: false
+config.use FastCov::CoverageTracker, allocations: false, constant_references: false, ancestor_references: false
 ```
 
-This disables the NEWOBJ hook (no per-allocation overhead) and skips AST parsing at stop time.
+This disables the NEWOBJ hook (no per-allocation overhead) and skips AST parsing/constant graph expansion at stop time.
 
 ### FileTracker
 
@@ -317,7 +320,7 @@ end
 1. `initialize(config, **options)` — Called when registered via `config.use`
 2. `install` — Called once after all trackers are registered
 3. `start` — Called on `FastCov.start` (in registration order)
-4. `stop` — Called on `FastCov.stop` (in reverse order), must return `{ path => true }`
+4. `stop` — Called on `FastCov.stop` (in registration order), must return `{ path => true }`
 
 Results from all trackers are merged, with later trackers overwriting earlier ones for duplicate keys.
 

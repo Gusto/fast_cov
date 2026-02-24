@@ -7,6 +7,10 @@
 /* ---- Cache -------------------------------------------------------------- */
 
 extern VALUE fast_cov_cache_hash;
+extern VALUE fast_cov_cache_key_const_refs;
+extern VALUE fast_cov_cache_key_const_locations;
+extern VALUE fast_cov_cache_key_const_ancestor_files;
+extern ID fast_cov_id_const_source_location;
 
 /* ---- Path filtering ----------------------------------------------------- */
 

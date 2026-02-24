@@ -110,6 +110,50 @@ RSpec.describe FastCov::Coverage, "line coverage" do
     end
   end
 
+  context "with class constants and ancestor_references" do
+    let(:root) { fixtures_path("app") }
+
+    it "does not include ancestor files when ancestor_references is disabled" do
+      coverage = described_class.new(
+        root: root,
+        constant_references: true,
+        ancestor_references: false,
+        allocations: false
+      )
+
+      coverage.start
+      expect(DynamicIncludedModelReader.new.model_class).to eq(DynamicIncludedModel)
+      result = coverage.stop
+
+      expect(result).to include(
+        fixtures_path("app/model/dynamic_included_model_reader.rb"),
+        fixtures_path("app/model/dynamic_included_model.rb")
+      )
+      expect(result).not_to include(
+        fixtures_path("app/concerns/queryable.rb")
+      )
+    end
+
+    it "includes ancestor files when ancestor_references is enabled" do
+      coverage = described_class.new(
+        root: root,
+        constant_references: true,
+        ancestor_references: true,
+        allocations: false
+      )
+
+      coverage.start
+      expect(DynamicIncludedModelReader.new.model_class).to eq(DynamicIncludedModel)
+      result = coverage.stop
+
+      expect(result).to include(
+        fixtures_path("app/model/dynamic_included_model_reader.rb"),
+        fixtures_path("app/model/dynamic_included_model.rb"),
+        fixtures_path("app/concerns/queryable.rb")
+      )
+    end
+  end
+
   it "handles dynamically defined methods via define_method" do
     klass = Class.new do
       define_method(:dynamic_add) do |a, b|
