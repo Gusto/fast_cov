@@ -65,6 +65,14 @@ VALUE fast_cov_rescue_nil(VALUE (*fn)(VALUE), VALUE arg) {
   return result;
 }
 
+VALUE fast_cov_share_string(VALUE str) {
+  if (!RB_TYPE_P(str, T_STRING)) {
+    return str;
+  }
+  // Returns a deduplicated, frozen interned string (fstring).
+  return rb_str_to_interned_str(str);
+}
+
 VALUE fast_cov_get_const_source_location(VALUE const_name_str) {
   return rb_funcall(rb_cObject, rb_intern("const_source_location"), 1,
                     const_name_str);
@@ -75,18 +83,29 @@ VALUE fast_cov_safely_get_const_source_location(VALUE const_name_str) {
                              const_name_str);
 }
 
+static VALUE get_or_init_const_locations_cache(void) {
+  VALUE key = ID2SYM(rb_intern("const_locations"));
+  VALUE cache = rb_hash_lookup(fast_cov_cache_hash, key);
+  if (!RB_TYPE_P(cache, T_HASH)) {
+    cache = rb_hash_new();
+    rb_hash_aset(fast_cov_cache_hash, key, cache);
+  }
+  return cache;
+}
+
 VALUE fast_cov_resolve_const_to_file(VALUE const_name_str) {
+  VALUE shared_const_name = fast_cov_share_string(const_name_str);
+
   // Check cache first
-  VALUE const_locations_hash =
-      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")));
-  VALUE cached = rb_hash_lookup(const_locations_hash, const_name_str);
+  VALUE const_locations_hash = get_or_init_const_locations_cache();
+  VALUE cached = rb_hash_lookup(const_locations_hash, shared_const_name);
   if (cached != Qnil) {
     return cached;
   }
 
   // Cache miss - resolve via Object.const_source_location
   VALUE source_location =
-      fast_cov_safely_get_const_source_location(const_name_str);
+      fast_cov_safely_get_const_source_location(shared_const_name);
   if (NIL_P(source_location) || !RB_TYPE_P(source_location, T_ARRAY) ||
       RARRAY_LEN(source_location) == 0) {
     return Qnil;
@@ -97,8 +116,10 @@ VALUE fast_cov_resolve_const_to_file(VALUE const_name_str) {
     return Qnil;
   }
 
-  // Cache the result
-  rb_hash_aset(const_locations_hash, const_name_str, filename);
+  VALUE shared_filename = fast_cov_share_string(filename);
 
-  return filename;
+  // Cache the result
+  rb_hash_aset(const_locations_hash, shared_const_name, shared_filename);
+
+  return shared_filename;
 }
