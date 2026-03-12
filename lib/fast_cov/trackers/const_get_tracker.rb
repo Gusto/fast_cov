@@ -12,7 +12,6 @@ module FastCov
   #
   # Note: This does NOT catch direct constant references like `Foo::Bar` in source
   # code - those compile to opt_getconstant_path bytecode and bypass const_get.
-  # Use CoverageTracker with constant_references: true for static analysis.
   #
   # Register via: config.use FastCov::ConstGetTracker
   # Options: root, ignored_path, threads (all default from config)
