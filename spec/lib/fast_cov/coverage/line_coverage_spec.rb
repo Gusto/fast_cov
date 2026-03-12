@@ -95,7 +95,7 @@ RSpec.describe FastCov::Coverage, "line coverage" do
   context "with root scoped to the full calculator directory" do
     let(:root) { fixtures_path("calculator") }
 
-    it "tracks both the file that accesses a constant and the file that defines it" do
+    it "tracks the file that executes the constant access" do
       subject.start
 
       reader = ConstantReader.new
@@ -103,10 +103,8 @@ RSpec.describe FastCov::Coverage, "line coverage" do
 
       coverage = subject.stop
 
-      expect(coverage).to include(
-        fixtures_path("calculator/operations/constant_reader.rb"),
-        fixtures_path("calculator/constants.rb")
-      )
+      expect(coverage).to include(fixtures_path("calculator/operations/constant_reader.rb"))
+      expect(coverage).not_to include(fixtures_path("calculator/constants.rb"))
     end
   end
 

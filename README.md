@@ -74,7 +74,6 @@ Trackers are registered with `config.use`. Each tracker receives the config obje
 
 ```ruby
 config.use FastCov::CoverageTracker
-config.use FastCov::CoverageTracker, constant_references: false
 config.use FastCov::FileTracker, ignored_path: "/custom/ignore"
 ```
 
@@ -111,7 +110,7 @@ end
 
 ### CoverageTracker
 
-Wraps the native C extension. Handles line event tracking, allocation tracing, and constant reference resolution.
+ Wraps the native C extension. Handles line event tracking and allocation tracing.
 
 ```ruby
 config.use FastCov::CoverageTracker
@@ -125,7 +124,6 @@ config.use FastCov::CoverageTracker
 | `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
 | `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 | `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
-| `constant_references` | Boolean | `true` | Parse source with Prism for constant references and resolve them to defining files. |
 
 #### What it tracks
 
@@ -133,17 +131,15 @@ config.use FastCov::CoverageTracker
 
 **Allocation tracing** (`allocations: true`) -- hooks `RUBY_INTERNAL_EVENT_NEWOBJ` to capture `T_OBJECT` and `T_STRUCT` allocations. At stop time, walks each instantiated class's ancestor chain and resolves every ancestor to its source file. This catches empty models, structs, and Data objects that line events alone would miss.
 
-**Constant reference resolution** (`constant_references: true`) -- at stop time, parses tracked files with Prism and walks the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references, then resolves each constant to its defining file via `Object.const_source_location`. Resolution is transitive (up to 10 rounds) and cached by filename for the lifetime of the process.
-
 #### Disabling expensive features
 
 For maximum speed when you only need line-level file tracking:
 
 ```ruby
-config.use FastCov::CoverageTracker, allocations: false, constant_references: false
+config.use FastCov::CoverageTracker, allocations: false
 ```
 
-This disables the NEWOBJ hook (no per-allocation overhead) and skips AST parsing at stop time.
+This disables the NEWOBJ hook and leaves only line event tracking enabled.
 
 ### FileTracker
 
@@ -191,7 +187,7 @@ Prepends a module on `FactoryBot.factories.singleton_class` to intercept the `fi
 
 ### ConstGetTracker
 
-Tracks constants looked up dynamically via `Module#const_get`. This catches dynamic constant lookups that static analysis (Prism) would miss.
+Tracks constants looked up dynamically via `Module#const_get`.
 
 ```ruby
 config.use FastCov::ConstGetTracker
@@ -203,7 +199,7 @@ config.use FastCov::ConstGetTracker
 - Rails' `"UserMailer".constantize` (uses `const_get` under the hood)
 - Any metaprogramming that looks up constants by string name
 
-**Note:** This does NOT catch direct constant references like `Foo::Bar` in source code -- those compile to `opt_getconstant_path` bytecode and bypass `const_get`. Use `CoverageTracker` with `constant_references: true` for static analysis of literal constant references.
+**Note:** This does NOT catch direct constant references like `Foo::Bar` in source code -- those compile to `opt_getconstant_path` bytecode and bypass `const_get`.
 
 #### Options
 
@@ -323,7 +319,7 @@ Results from all trackers are merged, with later trackers overwriting earlier on
 
 ## Cache
 
-FastCov caches constant reference resolution results in memory so files only need parsing once per process. The cache is process-level, keyed by filename, and populated automatically during `stop`.
+FastCov caches `Object.const_source_location` results in memory so allocation tracing and `ConstGetTracker` lookups can reuse them across runs.
 
 ```ruby
 FastCov::Cache.data      # the raw cache hash

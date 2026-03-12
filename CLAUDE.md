@@ -40,7 +40,7 @@ lib/fast_cov/
     factory_bot_tracker.rb # Tracks FactoryBot factory definition files.
   benchmark/
     runner.rb          # Benchmark harness: measurement, baseline comparison, reporting.
-    scenarios.rb       # The 7 benchmark scenario definitions.
+    scenarios.rb       # The benchmark scenario definitions.
 
 spec/
   lib/fast_cov/coverage/   # Integration tests organized by feature.
@@ -57,17 +57,15 @@ bin/
 
 The C extension defines `FastCov::Coverage` (a Ruby class) and `FastCov::Cache` (a Ruby module). Everything performance-sensitive lives in C.
 
-### Three coverage mechanisms
+### Two coverage mechanisms
 
 **1. Line coverage** — The core feature. Hooks `RUBY_EVENT_LINE` which fires every time the Ruby VM executes a new line. The callback (`on_line_event`) records the source file path. It uses a pointer-caching optimization: `rb_sourcefile()` returns a `const char*` whose address doesn't change for the same file, so we compare pointers (a single integer comparison) instead of strings to skip files we've already seen.
 
 **2. Allocation tracing** — Optional. Hooks `RUBY_INTERNAL_EVENT_NEWOBJ` which fires on every object allocation. We only care about `T_OBJECT` and `T_STRUCT` types (regular classes and structs). During `stop`, we iterate every class that was instantiated, walk its full ancestor chain (`rb_mod_ancestors`), and resolve each ancestor to its source file via `Object.const_source_location`. This catches classes that have no executable methods (empty models, structs, Data objects).
 
-**3. Constant reference resolution** — Runs at `stop` time. For each file already in the coverage results, we parse it with Prism and walk the AST for `ConstantPathNode` and `ConstantReadNode` to extract constant references (e.g., `Foo::BAR`), then resolve each constant to its defining file via `Object.const_source_location`. This is transitive — if file A references a constant in file B, and file B references a constant in file C, all three end up in the results. Runs up to 10 rounds until no new files are discovered.
-
 ### In-memory cache
 
-Constant resolution is the expensive part (Prism parsing). Results are cached in a process-level Ruby Hash (`fast_cov_cache_hash`), keyed by filename. Once a file is parsed, the extracted constants are cached for the lifetime of the process — no invalidation needed since files don't change during a test suite run. The cache is shared across all `FastCov::Coverage` instances. `FastCov::Cache.clear` resets it.
+`Object.const_source_location` results are cached in a process-level Ruby Hash (`fast_cov_cache_hash`) and shared across all `FastCov::Coverage` instances. `FastCov::Cache.clear` resets it.
 
 ### GC integration
 
@@ -84,7 +82,7 @@ The C struct uses Ruby's TypedData API with proper `mark` and `free` callbacks. 
 
 ## Benchmark scenarios
 
-The 9 benchmarks in `lib/fast_cov/benchmark/scenarios.rb` measure distinct aspects of the system. When adding new features or optimizing, run `bin/benchmark` before and after to check for regressions.
+The benchmarks in `lib/fast_cov/benchmark/scenarios.rb` measure distinct aspects of the system. When adding new features or optimizing, run `bin/benchmark` before and after to check for regressions.
 
 | Scenario | What it measures |
 |---|---|
@@ -93,8 +91,6 @@ The 9 benchmarks in `lib/fast_cov/benchmark/scenarios.rb` measure distinct aspec
 | Line coverage (single-threaded) | Per-thread hook mode (`threads: false`) vs global hook |
 | Line coverage (with ignored_path) | Overhead of ignored_path filtering in the hot path |
 | Allocation tracing | Overhead of NEWOBJ hooks + ancestor chain resolution at stop time |
-| Constant resolution (cold cache) | Full Prism parse + const resolution when cache is empty |
-| Constant resolution (warm cache) | Cache hit path — just hash lookup, no parsing |
 | Rapid start/stop (100x) | Hook install/remove overhead across many cycles |
 | Multi-threaded coverage | Thread creation + global hook overhead |
 
@@ -112,10 +108,10 @@ The runner takes 5 samples per scenario and reports the **median** to filter out
 
 - **C over Ruby for the hot path.** Line event callbacks fire on every line of Ruby execution. Even small overhead per call multiplies across millions of events. The C extension avoids Ruby method dispatch, object allocation, and GC pressure in the callback.
 - **Pointer caching for filename dedup.** `rb_sourcefile()` returns the same pointer for the same file. Comparing a pointer (one CPU instruction) is much faster than comparing strings.
-- **Post-processing at stop time.** Constant resolution and allocation tracing processing happen in `stop`, not during execution. This keeps the hot path (line events) as lean as possible.
-- **Process-level cache.** The Prism parsing cache is static/global, shared across all Coverage instances. In a test suite, the same source files are analyzed repeatedly — the cache means each file is parsed once.
+- **Post-processing at stop time.** Allocation tracing processing happens in `stop`, not during execution. This keeps the hot path (line events) as lean as possible.
+- **Process-level cache.** `const_source_location` results are cached globally and shared across Coverage instances.
 - **No disk cache (for now).** The in-memory cache is sufficient for single test suite runs. Disk persistence was built and removed — it can be added back when needed.
-- **Ruby 3.4+ only.** No version-conditional code. `GC.compact`, `Data.define`, Prism are all available unconditionally.
+- **Ruby 3.4+ only.** No version-conditional code. `GC.compact` and `Data.define` are available unconditionally.
 
 ## Releasing
 

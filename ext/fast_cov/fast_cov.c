@@ -12,14 +12,7 @@
 // Tracks which source files are executed during a test run by hooking into
 // Ruby VM events. Designed for test impact analysis.
 
-#define MAX_CONST_RESOLUTION_ROUNDS 10
-
 // threads: true = multi-threaded (global hook), false = single-threaded (per-thread hook)
-
-// Constant resolution via Ruby helper (FastCov::ConstantExtractor)
-static VALUE cConstantExtractor;
-static ID id_extract;
-static ID id_keys;
 
 // Cache infrastructure
 VALUE fast_cov_cache_hash; // process-level cache (non-static for access from utils)
@@ -49,7 +42,6 @@ struct fast_cov_data {
   uintptr_t last_filename_ptr;
 
   bool threads;
-  bool constant_references;
   bool allocations;
   VALUE th_covered;
 
@@ -111,7 +103,6 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->ignored_path_len = 0;
   data->last_filename_ptr = 0;
   data->threads = true;
-  data->constant_references = true;
   data->allocations = true;
   data->klasses_table = st_init_numtable();
 
@@ -226,90 +217,6 @@ static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
   st_insert(data->klasses_table, (st_data_t)klass, 1);
 }
 
-// ---- Constant reference resolution (cached) -----------------------------
-
-// Parse file with Prism and extract constant names.
-static VALUE extract_const_names_body(VALUE filename) {
-  return rb_funcall(cConstantExtractor, id_extract, 1, filename);
-}
-
-// Returns an array of constant name strings for a file, using the cache.
-// Cache is keyed by filename only - once parsed, results are cached for
-// the lifetime of the process. No digest/mtime validation needed since
-// files don't change during a test suite run.
-static VALUE get_const_refs_for_file(VALUE filename) {
-  VALUE const_refs_hash =
-      rb_hash_lookup(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")));
-
-  // Cache hit: return cached refs
-  VALUE cached = rb_hash_lookup(const_refs_hash, filename);
-  if (cached != Qnil) {
-    return cached;
-  }
-
-  // Cache miss: parse with Prism and extract constant names
-  int exception_state;
-  VALUE const_names =
-      rb_protect(extract_const_names_body, filename, &exception_state);
-  if (exception_state != 0) {
-    rb_set_errinfo(Qnil);
-    return Qnil;
-  }
-
-  // Store in cache (filename -> refs)
-  rb_hash_aset(const_refs_hash, filename, const_names);
-
-  return const_names;
-}
-
-static void resolve_constant_references(struct fast_cov_data *data) {
-  VALUE seen_consts = rb_hash_new();
-  VALUE processed_files = rb_hash_new();
-
-  for (int round = 0; round < MAX_CONST_RESOLUTION_ROUNDS; round++) {
-    VALUE keys = rb_funcall(data->impacted_files, id_keys, 0);
-    long num_keys = RARRAY_LEN(keys);
-    int found_new_file = 0;
-
-    for (long i = 0; i < num_keys; i++) {
-      VALUE filename = rb_ary_entry(keys, i);
-
-      if (rb_hash_lookup(processed_files, filename) != Qnil) {
-        continue;
-      }
-      rb_hash_aset(processed_files, filename, Qtrue);
-
-      VALUE const_names = get_const_refs_for_file(filename);
-      if (NIL_P(const_names) || !RB_TYPE_P(const_names, T_ARRAY)) {
-        continue;
-      }
-
-      long num_refs = RARRAY_LEN(const_names);
-      for (long j = 0; j < num_refs; j++) {
-        VALUE const_name = rb_ary_entry(const_names, j);
-
-        if (rb_hash_lookup(seen_consts, const_name) != Qnil) {
-          continue;
-        }
-        rb_hash_aset(seen_consts, const_name, Qtrue);
-
-        VALUE resolved_file = fast_cov_resolve_const_to_file(const_name);
-        if (NIL_P(resolved_file)) {
-          continue;
-        }
-
-        if (record_impacted_file(data, resolved_file)) {
-          found_new_file = 1;
-        }
-      }
-    }
-
-    if (!found_new_file) {
-      break;
-    }
-  }
-}
-
 // ---- Utils module methods (FastCov::Utils) ------------------------------
 
 // Utils.path_within?(path, directory) -> true/false
@@ -399,8 +306,6 @@ static VALUE cache_set_data(VALUE self, VALUE new_cache) {
 
 static VALUE cache_clear(VALUE self) {
   rb_funcall(fast_cov_cache_hash, id_clear, 0);
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
-               rb_hash_new());
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
                rb_hash_new());
   return Qnil;
@@ -427,11 +332,6 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   VALUE rb_threads = rb_hash_lookup(opt, ID2SYM(rb_intern("threads")));
   bool threads = (rb_threads != Qfalse);
 
-  // constant_references: defaults to true
-  VALUE rb_const_refs =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("constant_references")));
-  bool constant_references = (rb_const_refs != Qfalse);
-
   // allocations: defaults to true
   VALUE rb_allocations =
       rb_hash_lookup(opt, ID2SYM(rb_intern("allocations")));
@@ -441,7 +341,6 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
   data->threads = threads;
-  data->constant_references = constant_references;
   data->allocations = allocations;
   data->root_len = RSTRING_LEN(rb_root);
   data->root =
@@ -514,10 +413,6 @@ static VALUE fast_cov_stop(VALUE self) {
     st_clear(data->klasses_table);
   }
 
-  if (data->constant_references) {
-    resolve_constant_references(data);
-  }
-
   VALUE res = data->impacted_files;
 
   data->impacted_files = rb_hash_new();
@@ -529,27 +424,16 @@ static VALUE fast_cov_stop(VALUE self) {
 // ---- Init ---------------------------------------------------------------
 
 void Init_fast_cov(void) {
-  id_extract = rb_intern("extract");
-  id_keys = rb_intern("keys");
   id_clear = rb_intern("clear");
   id_merge_bang = rb_intern("merge!");
-
-  rb_require("fast_cov/constant_extractor");
 
   // Initialize process-level cache
   fast_cov_cache_hash = rb_hash_new();
   rb_gc_register_address(&fast_cov_cache_hash);
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_refs")),
-               rb_hash_new());
   rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
                rb_hash_new());
 
   VALUE mFastCov = rb_define_module("FastCov");
-
-  // FastCov::ConstantExtractor must be loaded before the C extension
-  cConstantExtractor =
-      rb_const_get(mFastCov, rb_intern("ConstantExtractor"));
-  rb_gc_register_address(&cConstantExtractor);
 
   VALUE cCoverage = rb_define_class_under(mFastCov, "Coverage", rb_cObject);
 

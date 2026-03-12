@@ -58,28 +58,6 @@ module FastCov
           cov.stop
         end
 
-        runner.scenario("Constant resolution (cold cache)") do
-          FastCov::Cache.clear
-          cov = FastCov::Coverage.new(root: root_calculator)
-          cov.start
-          ConstantReader.new.operations
-          calculator.add(1, 2)
-          cov.stop
-        end
-
-        runner.scenario("Constant resolution (warm cache)") do
-          warm = FastCov::Coverage.new(root: root_calculator)
-          warm.start
-          ConstantReader.new.operations
-          warm.stop
-
-          cov = FastCov::Coverage.new(root: root_calculator)
-          cov.start
-          ConstantReader.new.operations
-          calculator.add(1, 2)
-          cov.stop
-        end
-
         runner.scenario("Rapid start/stop (100x)") do
           cov = FastCov::Coverage.new(root: root_calculator)
           100.times do
