@@ -110,7 +110,7 @@ end
 
 ### CoverageTracker
 
- Wraps the native C extension. Handles line event tracking and allocation tracing.
+Wraps the native C extension. Handles line event tracking and allocation tracing.
 
 ```ruby
 config.use FastCov::CoverageTracker
@@ -212,6 +212,59 @@ config.use FastCov::ConstGetTracker
 #### How it works
 
 Prepends a module on `Module` to intercept `const_get` calls. When a constant is looked up, the tracker calls `const_source_location` to find where the constant was defined and records that file.
+
+## StaticMap
+
+`FastCov::StaticMap` is a separate build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and returns a direct dependency graph for every reachable file.
+
+```ruby
+graph = FastCov::StaticMap.build(
+  files: ["spec/**/*_spec.rb", "packs/**/spec/**/*_spec.rb"],
+  root: Rails.root
+)
+
+# => {
+#   "/app/spec/models/user_spec.rb" => ["/app/app/models/user.rb"],
+#   "/app/app/models/user.rb" => ["/app/app/models/account.rb"]
+# }
+```
+
+If you specifically need the older transitive closure shape, use `build_transitive`:
+
+```ruby
+map = FastCov::StaticMap.build_transitive(
+  files: "spec/**/*_spec.rb",
+  root: Rails.root
+)
+
+# => {
+#   "/app/spec/models/user_spec.rb" => [
+#     "/app/app/models/user.rb",
+#     "/app/app/models/account.rb"
+#   ]
+# }
+```
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `files` | String or Array<String> | required | Glob or file list to traverse. Relative paths are expanded against `root`. |
+| `root` | String or Pathname | `Dir.pwd` | Absolute project root. Only resolved files under this path are included. |
+| `ignored_paths` | String or Array<String> | `[]` | Files or directories to exclude from the returned map and recursive traversal. |
+
+#### How it works
+
+- `build` traverses reachable files once and returns only direct file-to-file edges
+- `build_transitive` computes a transitive closure for each input file
+- Shared parse, constant-resolution, and direct-dependency caches are reused within a builder instance
+- Resolves each reference from most-specific lexical candidate to least-specific candidate
+- Uses `const_get` and `const_source_location` to resolve literal constant references to backing source files
+- Negative-caches misses to avoid repeated failed lookups during graph traversal
+
+This is intended for a booted application process. It will execute autoloads while resolving constants, and it will not see dynamic constant lookups that are not expressed as literal constants in the source.
+
+For CI aggregation, `build` is usually the better primitive: callers can merge its direct edges with runtime coverage mappings instead of materializing a full transitive spec-to-dependency map in Ruby.
 
 ## Writing custom trackers
 
