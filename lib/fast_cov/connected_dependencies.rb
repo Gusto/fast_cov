@@ -8,7 +8,6 @@ module FastCov
     class << self
       def connect(owner:, dependency:)
         config = configuration
-        return unless config
 
         owner_path = normalize_path(owner)
         return unless trackable_path?(owner_path, config)
@@ -30,14 +29,12 @@ module FastCov
         while index < queue.length
           owner = queue[index]
           index += 1
-          next unless owner.is_a?(String)
           next if visited[owner]
 
           visited[owner] = true
           dependencies = connections[owner] || {}
 
           dependencies.each_key do |dependency|
-            next unless dependency.is_a?(String)
             next if paths.include?(dependency) || expanded.include?(dependency)
 
             expanded.add(dependency)
