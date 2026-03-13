@@ -5,7 +5,7 @@ module FastCov
   #
   # Provides common functionality:
   # - Path filtering (root, ignored_path)
-  # - Thread-aware recording (threads option)
+  # - Thread-aware recording (global threads config)
   # - File collection and lifecycle management
   #
   # Descendants override hooks: on_start, on_stop, on_record
@@ -15,10 +15,9 @@ module FastCov
   # - threads: true  -> record from ALL threads (global tracking)
   # - threads: false -> only record from the thread that called start
   class AbstractTracker
-    def initialize(config, **options)
-      @root = options.fetch(:root, config.root)
-      @ignored_path = options.fetch(:ignored_path, config.ignored_path)
-      @threads = options.fetch(:threads, config.threads)
+    include ConfigurationHelper
+
+    def initialize(**_options)
       @files = nil
       @started_thread = nil
     end
@@ -27,7 +26,7 @@ module FastCov
 
     def start
       @files = Set.new
-      @started_thread = Thread.current unless @threads
+      @started_thread = Thread.current unless threads?
       self.class.active = self
       on_start
     end
@@ -41,11 +40,18 @@ module FastCov
       result
     end
 
-    def record(abs_path)
-      return if !@threads && Thread.current != @started_thread
-      return unless Utils.path_within?(abs_path, @root)
-      return if @ignored_path && Utils.path_within?(abs_path, @ignored_path)
-      @files.add(abs_path) if on_record(abs_path)
+    def record(abs_path, owner: nil)
+      return if !threads? && Thread.current != @started_thread
+      path = normalize_path(abs_path)
+      return unless trackable_path?(path)
+      return unless on_record(path)
+
+      @files.add(path)
+      ConnectedDependencies.connect(owner: owner, dependency: path) if owner
+    end
+
+    def trackable_path?(path)
+      include_path?(normalize_path(path))
     end
 
     # Hooks for descendants - override as needed
@@ -56,6 +62,26 @@ module FastCov
 
     def on_record(abs_path)
       true
+    end
+
+    private
+
+    def include_path?(abs_path)
+      return false unless abs_path
+      return false unless Utils.path_within?(abs_path, configuration.root)
+      return false if configuration.ignored_path && Utils.path_within?(abs_path, configuration.ignored_path)
+
+      true
+    end
+
+    def threads?
+      configuration.threads
+    end
+
+    def normalize_path(path)
+      return if path.nil?
+
+      File.expand_path(path.to_s)
     end
 
     class << self
@@ -69,11 +95,11 @@ module FastCov
       #   record { expensive_lookup }          # lazy evaluation
       #   record("/path") { fallback }         # path takes precedence
       #
-      def record(abs_path = nil)
+      def record(abs_path = nil, owner: nil)
         return unless active
 
         path = abs_path || (yield if block_given?)
-        active.record(path) if path
+        active.record(path, owner: owner) if path
       end
 
       def reset

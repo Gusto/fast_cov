@@ -23,7 +23,11 @@ RSpec.describe FastCov::ConstGetTracker do
     )
   end
 
-  subject(:tracker) { described_class.new(config) }
+  subject(:tracker) { described_class.new }
+
+  before do
+    allow(FastCov).to receive(:configuration).and_return(config)
+  end
 
   describe "#install" do
     it "patches Module with ConstGetPatch" do
@@ -115,7 +119,8 @@ RSpec.describe FastCov::ConstGetTracker do
         ignored_path: nil,
         threads: true
       )
-      tracker = described_class.new(other_root_config)
+      allow(FastCov).to receive(:configuration).and_return(other_root_config)
+      tracker = described_class.new
       tracker.install
 
       tracker.start
@@ -133,7 +138,8 @@ RSpec.describe FastCov::ConstGetTracker do
         ignored_path: fixtures_path("const_get"),
         threads: true
       )
-      tracker = described_class.new(ignored_config)
+      allow(FastCov).to receive(:configuration).and_return(ignored_config)
+      tracker = described_class.new
       tracker.install
 
       tracker.start

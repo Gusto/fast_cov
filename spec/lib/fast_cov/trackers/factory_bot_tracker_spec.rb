@@ -23,7 +23,11 @@ RSpec.describe FastCov::FactoryBotTracker do
     )
   end
 
-  subject(:tracker) { described_class.new(config) }
+  subject(:tracker) { described_class.new }
+
+  before do
+    allow(FastCov).to receive(:configuration).and_return(config)
+  end
 
   describe "#install" do
     it "patches FactoryBot.factories with RegistryPatch" do
@@ -78,7 +82,8 @@ RSpec.describe FastCov::FactoryBotTracker do
         ignored_path: nil,
         threads: true
       )
-      tracker = described_class.new(other_root_config)
+      allow(FastCov).to receive(:configuration).and_return(other_root_config)
+      tracker = described_class.new
       tracker.install
 
       tracker.start
@@ -96,7 +101,8 @@ RSpec.describe FastCov::FactoryBotTracker do
         ignored_path: fixtures_path("factory_bot"),
         threads: true
       )
-      tracker = described_class.new(ignored_config)
+      allow(FastCov).to receive(:configuration).and_return(ignored_config)
+      tracker = described_class.new
       tracker.install
 
       tracker.start
@@ -166,7 +172,7 @@ RSpec.describe FastCov::FactoryBotTracker do
       factory_bot = Object.send(:remove_const, :FactoryBot)
 
       begin
-        tracker = described_class.new(config)
+        tracker = described_class.new
         expect { tracker.install }.to raise_error(
           LoadError,
           /factory_bot gem/

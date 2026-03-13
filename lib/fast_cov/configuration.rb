@@ -51,7 +51,11 @@ module FastCov
 
     def install_trackers
       @tracker_definitions.map do |entry|
-        tracker = entry[:klass].new(self, **entry[:options])
+        tracker = if entry[:klass] <= AbstractTracker
+          entry[:klass].new(**entry[:options])
+        else
+          entry[:klass].new(self, **entry[:options])
+        end
         tracker.install if tracker.respond_to?(:install)
         tracker
       end

@@ -13,6 +13,10 @@ module FastCov
       self
     end
 
+    def configuration
+      @configuration
+    end
+
     def start(&block)
       raise "FastCov.configure must be called before start" unless configured?
       @trackers.each(&:start)
@@ -33,6 +37,7 @@ module FastCov
       raise "FastCov.configure must be called before stop" unless configured?
       result = Set.new
       @trackers.each { |t| result.merge(t.stop) }
+      result.merge(ConnectedDependencies.expand(result))
       Utils.relativize_paths(result, @configuration.root)
     end
 

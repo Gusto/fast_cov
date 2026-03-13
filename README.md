@@ -70,11 +70,11 @@ end
 
 ### Registering trackers
 
-Trackers are registered with `config.use`. Each tracker receives the config object and any options you pass:
+Trackers are registered with `config.use`. `root`, `ignored_path`, and `threads` always come from the main FastCov configuration. Trackers may accept tracker-specific options such as `allocations`:
 
 ```ruby
 config.use FastCov::CoverageTracker
-config.use FastCov::FileTracker, ignored_path: "/custom/ignore"
+config.use FastCov::CoverageTracker, allocations: false
 ```
 
 ## Singleton API
@@ -110,7 +110,7 @@ end
 
 ### CoverageTracker
 
- Wraps the native C extension. Handles line event tracking and allocation tracing.
+Wraps the native C extension. Handles line event tracking and allocation tracing.
 
 ```ruby
 config.use FastCov::CoverageTracker
@@ -120,9 +120,6 @@ config.use FastCov::CoverageTracker
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `root` | String | `config.root` | Override the root path for this tracker. |
-| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
-| `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 | `allocations` | Boolean | `true` | Track object allocations and resolve class hierarchies to source files. |
 
 #### What it tracks
@@ -149,14 +146,6 @@ Tracks files read from disk during coverage -- JSON, YAML, ERB templates, or any
 config.use FastCov::FileTracker
 ```
 
-#### Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `root` | String | `config.root` | Override the root path for this tracker. |
-| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
-| `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
-
 #### How it works
 
 Prepends a module on `File.singleton_class` to intercept `File.read` and `File.open` (read-mode only). When a file within the root is read during coverage, its path is recorded. Write operations (`"w"`, `"a"`, etc.) are ignored.
@@ -172,14 +161,6 @@ config.use FastCov::FactoryBotTracker
 ```
 
 **Requires:** The `factory_bot` gem must be installed. Raises `LoadError` if FactoryBot is not defined.
-
-#### Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `root` | String | `config.root` | Override the root path for this tracker. |
-| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
-| `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 
 #### How it works
 
@@ -200,14 +181,6 @@ config.use FastCov::ConstGetTracker
 - Any metaprogramming that looks up constants by string name
 
 **Note:** This does NOT catch direct constant references like `Foo::Bar` in source code -- those compile to `opt_getconstant_path` bytecode and bypass `const_get`.
-
-#### Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `root` | String | `config.root` | Override the root path for this tracker. |
-| `ignored_path` | String | `config.ignored_path` | Override the ignored path for this tracker. |
-| `threads` | Boolean | `config.threads` | Override the threading mode for this tracker. |
 
 #### How it works
 
@@ -310,7 +283,7 @@ end
 
 ### Tracker lifecycle
 
-1. `initialize(config, **options)` — Called when registered via `config.use`
+1. `initialize(**options)` for `AbstractTracker` subclasses, or `initialize(config, **options)` for custom trackers that manage config directly
 2. `install` — Called once after all trackers are registered
 3. `start` — Called on `FastCov.start` (in registration order)
 4. `stop` — Called on `FastCov.stop` (in reverse order), must return `{ path => true }`

@@ -9,30 +9,25 @@ RSpec.describe FastCov::AbstractTracker do
     )
   end
 
-  subject(:tracker) { described_class.new(config) }
+  subject(:tracker) { described_class.new }
 
   before do
     described_class.reset
+    allow(FastCov).to receive(:configuration).and_return(config)
   end
 
   describe "#initialize" do
-    it "reads root from config" do
-      expect(tracker.instance_variable_get(:@root)).to eq("/app")
+    it "does not store config state" do
+      expect(tracker.instance_variable_get(:@config)).to be_nil
     end
 
-    it "reads ignored_path from config" do
-      expect(tracker.instance_variable_get(:@ignored_path)).to eq("/app/vendor")
-    end
+    it "ignores tracker options and relies on config" do
+      tracker = described_class.new(threads: false)
+      tracker.start
+      thread = Thread.new { tracker.record("/app/foo.rb") }
+      thread.join
 
-    it "reads threads from config" do
-      expect(tracker.instance_variable_get(:@threads)).to eq(true)
-    end
-
-    it "allows options to override config" do
-      tracker = described_class.new(config, root: "/other", ignored_path: nil, threads: false)
-      expect(tracker.instance_variable_get(:@root)).to eq("/other")
-      expect(tracker.instance_variable_get(:@ignored_path)).to be_nil
-      expect(tracker.instance_variable_get(:@threads)).to eq(false)
+      expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
     end
   end
 
@@ -127,6 +122,28 @@ RSpec.describe FastCov::AbstractTracker do
       expect(files).not_to include("/app/bar.txt")
     end
 
+    it "learns owner connections for recorded paths" do
+      tracker.record("/app/config/settings.yml", owner: "/app/services/config_reader.rb")
+
+      expect(FastCov::Cache.data[:connections]).to eq(
+        "/app/services/config_reader.rb" => {
+          "/app/config/settings.yml" => true
+        }
+      )
+    end
+
+    it "does not learn connections when the owner is outside root" do
+      tracker.record("/app/config/settings.yml", owner: "/other/config_reader.rb")
+
+      expect(FastCov::Cache.data[:connections]).to be_nil
+    end
+
+    it "does not learn self-connections" do
+      tracker.record("/app/config/settings.yml", owner: "/app/config/settings.yml")
+
+      expect(FastCov::Cache.data[:connections]).to be_nil
+    end
+
     context "with threads: false" do
       let(:config) { double("config", root: "/app", ignored_path: nil, threads: false) }
 
@@ -184,6 +201,17 @@ RSpec.describe FastCov::AbstractTracker do
       expect { described_class.record("/app/foo.rb") }.not_to raise_error
     end
 
+    it "passes owner through to the active instance" do
+      tracker.start
+      described_class.record("/app/config/settings.yml", owner: "/app/services/config_reader.rb")
+
+      expect(FastCov::Cache.data[:connections]).to eq(
+        "/app/services/config_reader.rb" => {
+          "/app/config/settings.yml" => true
+        }
+      )
+    end
+
     context "with block form" do
       it "yields block and records result when active" do
         tracker.start
@@ -218,8 +246,8 @@ RSpec.describe FastCov::AbstractTracker do
     let(:subclass_b) { Class.new(described_class) }
 
     it "each subclass has its own active tracker" do
-      tracker_a = subclass_a.new(config)
-      tracker_b = subclass_b.new(config)
+      tracker_a = subclass_a.new
+      tracker_b = subclass_b.new
 
       tracker_a.start
       tracker_b.start

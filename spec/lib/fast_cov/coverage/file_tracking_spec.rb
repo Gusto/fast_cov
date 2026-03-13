@@ -116,12 +116,13 @@ RSpec.describe "FastCov file tracking" do
     end
   end
 
-  context "when enabled with ignored_path override" do
+  context "when enabled with ignored_path configured globally" do
     before do
       FastCov.configure do |config|
         config.root = root
+        config.ignored_path = fixtures_path("calculator", "operations")
         config.use FastCov::CoverageTracker
-        config.use FastCov::FileTracker, ignored_path: fixtures_path("calculator", "operations")
+        config.use FastCov::FileTracker
       end
     end
 

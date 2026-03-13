@@ -14,7 +14,6 @@ module FastCov
   # code - those compile to opt_getconstant_path bytecode and bypass const_get.
   #
   # Register via: config.use FastCov::ConstGetTracker
-  # Options: root, ignored_path, threads (all default from config)
   class ConstGetTracker < AbstractTracker
     def install
       Module.prepend(ConstGetPatch)
@@ -23,7 +22,8 @@ module FastCov
     module ConstGetPatch
       def const_get(name, inherit = true)
         result = super
-        FastCov::ConstGetTracker.record do
+        owner = caller_locations(1, 1).first&.absolute_path
+        FastCov::ConstGetTracker.record(owner: owner) do
           location = self.const_source_location(name, inherit) rescue nil
           location&.first
         end
