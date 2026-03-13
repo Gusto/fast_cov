@@ -10,7 +10,6 @@ module FastCov
   # to record the source file where each factory was defined.
   #
   # Register via: config.use FastCov::FactoryBotTracker
-  # Options: root, ignored_path, threads (all default from config)
   class FactoryBotTracker < AbstractTracker
     def install
       unless defined?(::FactoryBot)

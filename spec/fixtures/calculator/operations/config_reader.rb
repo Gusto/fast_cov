@@ -8,4 +8,12 @@ class ConfigReader
   def self.read_config
     File.read(config_path)
   end
+
+  def self.read_memoized_config
+    @memoized_config ||= File.read(config_path)
+  end
+
+  def self.reset
+    @memoized_config = nil
+  end
 end

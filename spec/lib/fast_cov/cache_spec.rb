@@ -35,5 +35,15 @@ RSpec.describe FastCov::Cache do
 
       expect(FastCov::Cache.data[:const_locations]).to be_empty
     end
+
+    it "removes learned connections" do
+      FastCov::Cache.data[:connections] = {
+        "/app/a.rb" => { "/app/config.yml" => true }
+      }
+
+      FastCov::Cache.clear
+
+      expect(FastCov::Cache.data[:connections]).to be_nil
+    end
   end
 end

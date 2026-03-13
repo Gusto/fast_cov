@@ -5,13 +5,13 @@ module FastCov
   # Handles line coverage and allocation tracing.
   #
   # Register via: config.use FastCov::CoverageTracker
-  # Options: root, ignored_path, threads, allocations
+  # Options: allocations
   class CoverageTracker
     def initialize(config, **options)
       @coverage = Coverage.new(
-        root: options.fetch(:root, config.root),
-        ignored_path: options.fetch(:ignored_path, config.ignored_path),
-        threads: options.fetch(:threads, config.threads),
+        root: config.root,
+        ignored_path: config.ignored_path,
+        threads: config.threads,
         allocations: options.fetch(:allocations, true)
       )
     end

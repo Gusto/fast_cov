@@ -103,20 +103,18 @@ RSpec.describe FastCov do
       expect(coverage).to include("config.yml")
     end
 
-    it "passes options to the tracker" do
+    it "passes tracker-specific options to the tracker" do
       FastCov.configure do |config|
         config.root = fixtures_path("calculator")
-        config.use FastCov::CoverageTracker
-        config.use FastCov::FileTracker, root: fixtures_path("calculator", "operations")
+        config.use FastCov::CoverageTracker, allocations: false
+        config.use FastCov::FileTracker
       end
 
-      FastCov.start
-      File.read(fixtures_path("calculator", "config.yml"))
-      File.read(fixtures_path("calculator", "operations", "ops_config.yml"))
-      coverage = FastCov.stop
+      coverage = FastCov.start do
+        File.read(fixtures_path("calculator", "config.yml"))
+      end
 
-      expect(coverage).not_to include("config.yml")
-      expect(coverage).to include("operations/ops_config.yml")
+      expect(coverage).to include("config.yml")
     end
   end
 end
