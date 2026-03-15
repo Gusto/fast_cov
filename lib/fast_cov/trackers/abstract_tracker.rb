@@ -4,8 +4,8 @@ module FastCov
   # Base class for trackers that record file paths during coverage.
   #
   # Provides common functionality:
-  # - Path filtering (root, ignored_path)
-  # - Thread-aware recording (threads option)
+  # - Path filtering (root, ignored_paths)
+  # - Thread-aware recording (CoverageMap#threads)
   # - File collection and lifecycle management
   #
   # Descendants override hooks: on_start, on_stop, on_record
@@ -15,10 +15,8 @@ module FastCov
   # - threads: true  -> record from ALL threads (global tracking)
   # - threads: false -> only record from the thread that called start
   class AbstractTracker
-    def initialize(config, **options)
-      @root = options.fetch(:root, config.root)
-      @ignored_path = options.fetch(:ignored_path, config.ignored_path)
-      @threads = options.fetch(:threads, config.threads)
+    def initialize(coverage_map, **_options)
+      @coverage_map = coverage_map
       @files = nil
       @started_thread = nil
     end
@@ -27,7 +25,7 @@ module FastCov
 
     def start
       @files = Set.new
-      @started_thread = Thread.current unless @threads
+      @started_thread = Thread.current unless @coverage_map.threads
       self.class.active = self
       on_start
     end
@@ -42,10 +40,12 @@ module FastCov
     end
 
     def record(abs_path)
-      return if !@threads && Thread.current != @started_thread
-      return unless Utils.path_within?(abs_path, @root)
-      return if @ignored_path && Utils.path_within?(abs_path, @ignored_path)
-      @files.add(abs_path) if on_record(abs_path)
+      return if !@coverage_map.threads && Thread.current != @started_thread
+
+      path = normalize_path(abs_path)
+      return unless @coverage_map.include_path?(path)
+
+      @files.add(path) if on_record(path)
     end
 
     # Hooks for descendants - override as needed
@@ -54,8 +54,16 @@ module FastCov
     def on_start; end
     def on_stop; end
 
-    def on_record(abs_path)
+    def on_record(path)
       true
+    end
+
+    private
+
+    def normalize_path(path)
+      return if path.nil?
+
+      File.expand_path(path.to_s)
     end
 
     class << self

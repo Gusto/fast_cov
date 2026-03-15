@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 RSpec.shared_context "coverage instance" do
-  let(:ignored_path) { nil }
+  let(:ignored_paths) { [] }
 
   subject do
     described_class.new(
       root: root,
-      ignored_path: ignored_path
+      ignored_paths: ignored_paths
     )
   end
 

@@ -9,13 +9,14 @@ module FastCov
   # This tracker intercepts FactoryBot.factories.find (called by create/build)
   # to record the source file where each factory was defined.
   #
-  # Register via: config.use FastCov::FactoryBotTracker
-  # Options: root, ignored_path, threads (all default from config)
+  # Register via: coverage_map.use(FastCov::FactoryBotTracker)
   class FactoryBotTracker < AbstractTracker
     def install
       unless defined?(::FactoryBot)
         raise LoadError, "FactoryBotTracker requires the factory_bot gem to be installed"
       end
+
+      return if ::FactoryBot.factories.singleton_class.ancestors.include?(RegistryPatch)
 
       ::FactoryBot.factories.singleton_class.prepend(RegistryPatch)
     end

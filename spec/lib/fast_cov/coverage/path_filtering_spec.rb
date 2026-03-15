@@ -24,8 +24,8 @@ RSpec.describe FastCov::Coverage, "path filtering" do
       )
     end
 
-    context "with an ignored_path set" do
-      let(:ignored_path) { fixtures_path("calculator/operations") }
+    context "with ignored_paths set" do
+      let(:ignored_paths) { [fixtures_path("calculator/operations")] }
 
       it "excludes files under the ignored path" do
         subject.start
@@ -42,8 +42,8 @@ RSpec.describe FastCov::Coverage, "path filtering" do
       end
     end
 
-    context "when ignored_path equals root" do
-      let(:ignored_path) { fixtures_path("calculator") }
+    context "when ignored_paths include root" do
+      let(:ignored_paths) { [fixtures_path("calculator")] }
 
       it "collects no coverage since everything is ignored" do
         subject.start
