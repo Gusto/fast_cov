@@ -151,5 +151,21 @@ RSpec.describe FastCov::Coverage, "line coverage" do
       expect(result).to include(fixtures_path("calculator/operations/multiply.rb"))
       expect(result).not_to include(fixtures_path("calculator/operations/add.rb"))
     end
+
+    it "stops tracking when the block raises" do
+      expect do
+        subject.start do
+          calculator.add(1, 2)
+          raise "boom"
+        end
+      end.to raise_error(RuntimeError, "boom")
+
+      subject.start
+      calculator.multiply(2, 3)
+      result = subject.stop
+
+      expect(result).to include(fixtures_path("calculator/operations/multiply.rb"))
+      expect(result).not_to include(fixtures_path("calculator/operations/add.rb"))
+    end
   end
 end

@@ -15,6 +15,7 @@
 
 // Forward declarations
 static VALUE fast_cov_stop(VALUE self);
+static VALUE fast_cov_yield_block(VALUE _arg);
 
 // ---- Data structure -----------------------------------------------------
 
@@ -31,6 +32,7 @@ struct fast_cov_data {
   uintptr_t last_filename_ptr;
 
   bool threads;
+  bool started;
   VALUE th_covered;
 };
 
@@ -88,6 +90,7 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->ignored_paths_count = 0;
   data->last_filename_ptr = 0;
   data->threads = true;
+  data->started = false;
 
   return obj;
 }
@@ -105,6 +108,8 @@ static bool record_impacted_file(struct fast_cov_data *data, VALUE filename) {
   rb_hash_aset(data->impacted_files, filename, Qtrue);
   return true;
 }
+
+static VALUE fast_cov_yield_block(VALUE _arg) { return rb_yield(Qnil); }
 
 // ---- Line event callback ------------------------------------------------
 
@@ -221,10 +226,14 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   if (!RTEST(rb_root)) {
     rb_root = rb_funcall(rb_cDir, rb_intern("pwd"), 0);
   }
+  Check_Type(rb_root, T_STRING);
 
   // ignored_paths: optional array, [] if not provided
   VALUE rb_ignored_paths =
       rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_paths")));
+  if (!NIL_P(rb_ignored_paths)) {
+    Check_Type(rb_ignored_paths, T_ARRAY);
+  }
 
   // threads: true (multi) or false (single), defaults to true
   VALUE rb_threads = rb_hash_lookup(opt, ID2SYM(rb_intern("threads")));
@@ -253,18 +262,21 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   }
   data->ignored_paths_count = 0;
 
-  if (RTEST(rb_ignored_paths) && RARRAY_LEN(rb_ignored_paths) > 0) {
+  if (!NIL_P(rb_ignored_paths) && RARRAY_LEN(rb_ignored_paths) > 0) {
     long i;
+    long ignored_paths_count = RARRAY_LEN(rb_ignored_paths);
 
-    Check_Type(rb_ignored_paths, T_ARRAY);
-    data->ignored_paths_count = RARRAY_LEN(rb_ignored_paths);
+    for (i = 0; i < ignored_paths_count; i++) {
+      Check_Type(rb_ary_entry(rb_ignored_paths, i), T_STRING);
+    }
+
+    data->ignored_paths_count = ignored_paths_count;
     data->ignored_paths = xmalloc(sizeof(char *) * data->ignored_paths_count);
     data->ignored_path_lens = xmalloc(sizeof(long) * data->ignored_paths_count);
 
     for (i = 0; i < data->ignored_paths_count; i++) {
       VALUE rb_ignored_path = rb_ary_entry(rb_ignored_paths, i);
 
-      Check_Type(rb_ignored_path, T_STRING);
       data->ignored_path_lens[i] = RSTRING_LEN(rb_ignored_path);
       data->ignored_paths[i] =
           fast_cov_ruby_strndup(RSTRING_PTR(rb_ignored_path),
@@ -283,6 +295,13 @@ static VALUE fast_cov_start(VALUE self) {
     rb_raise(rb_eRuntimeError, "root is required");
   }
 
+  if (data->started) {
+    if (rb_block_given_p()) {
+      rb_raise(rb_eRuntimeError, "Coverage is already started");
+    }
+    return self;
+  }
+
   if (!data->threads) {
     VALUE thval = rb_thread_current();
     rb_thread_add_event_hook(thval, on_line_event, RUBY_EVENT_LINE, self);
@@ -290,11 +309,17 @@ static VALUE fast_cov_start(VALUE self) {
   } else {
     rb_add_event_hook(on_line_event, RUBY_EVENT_LINE, self);
   }
+  data->started = true;
 
   // Block form: start { ... } runs the block then returns stop result
   if (rb_block_given_p()) {
-    rb_yield(Qnil);
-    return fast_cov_stop(self);
+    int exception_state = 0;
+    rb_protect(fast_cov_yield_block, Qnil, &exception_state);
+    VALUE result = fast_cov_stop(self);
+    if (exception_state != 0) {
+      rb_jump_tag(exception_state);
+    }
+    return result;
   }
 
   return self;
@@ -303,6 +328,10 @@ static VALUE fast_cov_start(VALUE self) {
 static VALUE fast_cov_stop(VALUE self) {
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
+
+  if (!data->started) {
+    return rb_hash_new();
+  }
 
   if (!data->threads) {
     VALUE thval = rb_thread_current();
@@ -319,6 +348,7 @@ static VALUE fast_cov_stop(VALUE self) {
 
   data->impacted_files = rb_hash_new();
   data->last_filename_ptr = 0;
+  data->started = false;
 
   return res;
 }

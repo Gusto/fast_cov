@@ -57,6 +57,22 @@ RSpec.describe FastCov::Coverage, "threading" do
 
       [t1, t2].each(&:join)
     end
+
+    it "returns empty coverage when stopped several times" do
+      cov = described_class.new(
+        root: root,
+        threads: false
+      )
+
+      cov.start
+      expect(calculator.add(1, 2)).to eq(3)
+
+      first_result = cov.stop
+      second_result = cov.stop
+
+      expect(first_result).to include(fixtures_path("calculator/operations/add.rb"))
+      expect(second_result).to be_empty
+    end
   end
 
   describe "multi threaded mode" do
