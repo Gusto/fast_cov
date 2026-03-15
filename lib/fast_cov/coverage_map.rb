@@ -100,6 +100,7 @@ module FastCov
     def include_path?(path)
       return false unless path
       return false unless Utils.path_within?(path, normalized_root)
+      return true if @ignored_paths.empty?
 
       normalized_ignored_paths.none? { |ignored_path| Utils.path_within?(path, ignored_path) }
     end
