@@ -1,7 +1,6 @@
 #include <ruby.h>
 #include <ruby/version.h>
 #include <ruby/debug.h>
-#include <ruby/st.h>
 
 #include <stdbool.h>
 
@@ -14,19 +13,8 @@
 
 // threads: true = multi-threaded (global hook), false = single-threaded (per-thread hook)
 
-// Cache infrastructure
-VALUE fast_cov_cache_hash; // process-level cache (non-static for access from utils)
-static ID id_clear;
-static ID id_merge_bang;
-
 // Forward declarations
 static VALUE fast_cov_stop(VALUE self);
-
-static int mark_key_for_gc_i(st_data_t key, st_data_t _value,
-                              st_data_t _data) {
-  rb_gc_mark((VALUE)key);
-  return ST_CONTINUE;
-}
 
 // ---- Data structure -----------------------------------------------------
 
@@ -36,17 +24,14 @@ struct fast_cov_data {
   char *root;
   long root_len;
 
-  char *ignored_path;
-  long ignored_path_len;
+  char **ignored_paths;
+  long *ignored_path_lens;
+  long ignored_paths_count;
 
   uintptr_t last_filename_ptr;
 
   bool threads;
-  bool allocations;
   VALUE th_covered;
-
-  VALUE object_allocation_tracepoint;
-  st_table *klasses_table;
 };
 
 // ---- GC callbacks -------------------------------------------------------
@@ -59,18 +44,19 @@ static void fast_cov_mark(void *ptr) {
   struct fast_cov_data *data = ptr;
   rb_gc_mark(data->impacted_files);
   rb_gc_mark(data->th_covered);
-  rb_gc_mark(data->object_allocation_tracepoint);
-
-  if (data->klasses_table != NULL) {
-    st_foreach(data->klasses_table, mark_key_for_gc_i, 0);
-  }
 }
 
 static void fast_cov_free(void *ptr) {
   struct fast_cov_data *data = ptr;
+  long i;
   if (data->root) xfree(data->root);
-  if (data->ignored_path) xfree(data->ignored_path);
-  if (data->klasses_table) st_free_table(data->klasses_table);
+  if (data->ignored_paths) {
+    for (i = 0; i < data->ignored_paths_count; i++) {
+      xfree(data->ignored_paths[i]);
+    }
+    xfree(data->ignored_paths);
+  }
+  if (data->ignored_path_lens) xfree(data->ignored_path_lens);
   xfree(data);
 }
 
@@ -93,18 +79,15 @@ static VALUE fast_cov_allocate(VALUE klass) {
   // Qfalse, not Qnil — and marking Qfalse can confuse Ruby 3.4's GC.
   data->impacted_files = Qnil;
   data->th_covered = Qnil;
-  data->object_allocation_tracepoint = Qnil;
-  data->klasses_table = NULL;
 
   data->impacted_files = rb_hash_new();
   data->root = NULL;
   data->root_len = 0;
-  data->ignored_path = NULL;
-  data->ignored_path_len = 0;
+  data->ignored_paths = NULL;
+  data->ignored_path_lens = NULL;
+  data->ignored_paths_count = 0;
   data->last_filename_ptr = 0;
   data->threads = true;
-  data->allocations = true;
-  data->klasses_table = st_init_numtable();
 
   return obj;
 }
@@ -113,8 +96,9 @@ static VALUE fast_cov_allocate(VALUE klass) {
 
 static bool record_impacted_file(struct fast_cov_data *data, VALUE filename) {
   if (!fast_cov_is_path_included(RSTRING_PTR(filename), data->root,
-                                 data->root_len, data->ignored_path,
-                                 data->ignored_path_len)) {
+                                 data->root_len, data->ignored_paths,
+                                 data->ignored_path_lens,
+                                 data->ignored_paths_count)) {
     return false;
   }
 
@@ -149,72 +133,6 @@ static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
   }
 
   record_impacted_file(data, filename);
-}
-
-// ---- Allocation tracing helpers -----------------------------------------
-
-static bool record_impacted_klass(struct fast_cov_data *data, VALUE klass) {
-  VALUE klass_name = fast_cov_rescue_nil(rb_class_name, klass);
-  if (klass_name == Qnil) {
-    return false;
-  }
-
-  VALUE filename = fast_cov_resolve_const_to_file(klass_name);
-  if (filename == Qnil) {
-    return false;
-  }
-
-  return record_impacted_file(data, filename);
-}
-
-static int each_instantiated_klass(st_data_t key, st_data_t _value,
-                                   st_data_t cb_data) {
-  VALUE klass = (VALUE)key;
-  struct fast_cov_data *data = (struct fast_cov_data *)cb_data;
-
-  VALUE ancestors = fast_cov_rescue_nil(rb_mod_ancestors, klass);
-  if (ancestors == Qnil || !RB_TYPE_P(ancestors, T_ARRAY)) {
-    return ST_CONTINUE;
-  }
-
-  long len = RARRAY_LEN(ancestors);
-  for (long i = 0; i < len; i++) {
-    VALUE mod = rb_ary_entry(ancestors, i);
-    if (mod == Qnil) {
-      continue;
-    }
-    record_impacted_klass(data, mod);
-  }
-
-  return ST_CONTINUE;
-}
-
-// ---- Newobj event callback ----------------------------------------------
-
-static void on_newobj_event(VALUE tracepoint_data, void *raw_data) {
-  rb_trace_arg_t *tracearg = rb_tracearg_from_tracepoint(tracepoint_data);
-  VALUE new_object = rb_tracearg_object(tracearg);
-
-  enum ruby_value_type type = rb_type(new_object);
-  if (type != RUBY_T_OBJECT && type != RUBY_T_STRUCT) {
-    return;
-  }
-
-  VALUE klass = rb_class_of(new_object);
-#if RUBY_API_VERSION_MAJOR < 4
-  // Ruby 3.x: rb_class_of can return 0 during NEWOBJ for some allocations
-  if (klass == Qnil || klass == 0) {
-#else
-  if (klass == Qnil) {
-#endif
-    return;
-  }
-  if (rb_mod_name(klass) == Qnil) {
-    return;
-  }
-
-  struct fast_cov_data *data = (struct fast_cov_data *)raw_data;
-  st_insert(data->klasses_table, (st_data_t)klass, 1);
 }
 
 // ---- Utils module methods (FastCov::Utils) ------------------------------
@@ -291,26 +209,6 @@ static VALUE utils_relativize_paths(VALUE self, VALUE set, VALUE root) {
   return set;
 }
 
-// ---- Cache module methods (FastCov::Cache) ------------------------------
-
-static VALUE cache_get_data(VALUE self) { return fast_cov_cache_hash; }
-
-static VALUE cache_set_data(VALUE self, VALUE new_cache) {
-  if (!RB_TYPE_P(new_cache, T_HASH)) {
-    rb_raise(rb_eTypeError, "cache data must be a Hash");
-  }
-  rb_funcall(fast_cov_cache_hash, id_clear, 0);
-  rb_funcall(fast_cov_cache_hash, id_merge_bang, 1, new_cache);
-  return fast_cov_cache_hash;
-}
-
-static VALUE cache_clear(VALUE self) {
-  rb_funcall(fast_cov_cache_hash, id_clear, 0);
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
-               rb_hash_new());
-  return Qnil;
-}
-
 // ---- Ruby instance methods ----------------------------------------------
 
 static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
@@ -324,37 +222,54 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
     rb_root = rb_funcall(rb_cDir, rb_intern("pwd"), 0);
   }
 
-  // ignored_path: optional, nil if not provided
-  VALUE rb_ignored_path =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_path")));
+  // ignored_paths: optional array, [] if not provided
+  VALUE rb_ignored_paths =
+      rb_hash_lookup(opt, ID2SYM(rb_intern("ignored_paths")));
 
   // threads: true (multi) or false (single), defaults to true
   VALUE rb_threads = rb_hash_lookup(opt, ID2SYM(rb_intern("threads")));
   bool threads = (rb_threads != Qfalse);
 
-  // allocations: defaults to true
-  VALUE rb_allocations =
-      rb_hash_lookup(opt, ID2SYM(rb_intern("allocations")));
-  bool allocations = (rb_allocations != Qfalse);
-
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
   data->threads = threads;
-  data->allocations = allocations;
+  if (data->root) xfree(data->root);
   data->root_len = RSTRING_LEN(rb_root);
   data->root =
       fast_cov_ruby_strndup(RSTRING_PTR(rb_root), data->root_len);
 
-  if (RTEST(rb_ignored_path)) {
-    data->ignored_path_len = RSTRING_LEN(rb_ignored_path);
-    data->ignored_path = fast_cov_ruby_strndup(RSTRING_PTR(rb_ignored_path),
-                                               data->ignored_path_len);
+  if (data->ignored_paths) {
+    long i;
+    for (i = 0; i < data->ignored_paths_count; i++) {
+      xfree(data->ignored_paths[i]);
+    }
+    xfree(data->ignored_paths);
+    data->ignored_paths = NULL;
   }
+  if (data->ignored_path_lens) {
+    xfree(data->ignored_path_lens);
+    data->ignored_path_lens = NULL;
+  }
+  data->ignored_paths_count = 0;
 
-  if (allocations) {
-    data->object_allocation_tracepoint = rb_tracepoint_new(
-        Qnil, RUBY_INTERNAL_EVENT_NEWOBJ, on_newobj_event, (void *)data);
+  if (RTEST(rb_ignored_paths) && RARRAY_LEN(rb_ignored_paths) > 0) {
+    long i;
+
+    Check_Type(rb_ignored_paths, T_ARRAY);
+    data->ignored_paths_count = RARRAY_LEN(rb_ignored_paths);
+    data->ignored_paths = xmalloc(sizeof(char *) * data->ignored_paths_count);
+    data->ignored_path_lens = xmalloc(sizeof(long) * data->ignored_paths_count);
+
+    for (i = 0; i < data->ignored_paths_count; i++) {
+      VALUE rb_ignored_path = rb_ary_entry(rb_ignored_paths, i);
+
+      Check_Type(rb_ignored_path, T_STRING);
+      data->ignored_path_lens[i] = RSTRING_LEN(rb_ignored_path);
+      data->ignored_paths[i] =
+          fast_cov_ruby_strndup(RSTRING_PTR(rb_ignored_path),
+                                data->ignored_path_lens[i]);
+    }
   }
 
   return Qnil;
@@ -374,10 +289,6 @@ static VALUE fast_cov_start(VALUE self) {
     data->th_covered = thval;
   } else {
     rb_add_event_hook(on_line_event, RUBY_EVENT_LINE, self);
-  }
-
-  if (data->object_allocation_tracepoint != Qnil) {
-    rb_tracepoint_enable(data->object_allocation_tracepoint);
   }
 
   // Block form: start { ... } runs the block then returns stop result
@@ -404,15 +315,6 @@ static VALUE fast_cov_stop(VALUE self) {
     rb_remove_event_hook(on_line_event);
   }
 
-  if (data->object_allocation_tracepoint != Qnil) {
-    rb_tracepoint_disable(data->object_allocation_tracepoint);
-  }
-
-  if (data->allocations) {
-    st_foreach(data->klasses_table, each_instantiated_klass, (st_data_t)data);
-    st_clear(data->klasses_table);
-  }
-
   VALUE res = data->impacted_files;
 
   data->impacted_files = rb_hash_new();
@@ -424,15 +326,6 @@ static VALUE fast_cov_stop(VALUE self) {
 // ---- Init ---------------------------------------------------------------
 
 void Init_fast_cov(void) {
-  id_clear = rb_intern("clear");
-  id_merge_bang = rb_intern("merge!");
-
-  // Initialize process-level cache
-  fast_cov_cache_hash = rb_hash_new();
-  rb_gc_register_address(&fast_cov_cache_hash);
-  rb_hash_aset(fast_cov_cache_hash, ID2SYM(rb_intern("const_locations")),
-               rb_hash_new());
-
   VALUE mFastCov = rb_define_module("FastCov");
 
   VALUE cCoverage = rb_define_class_under(mFastCov, "Coverage", rb_cObject);
@@ -441,12 +334,6 @@ void Init_fast_cov(void) {
   rb_define_method(cCoverage, "initialize", fast_cov_initialize, -1);
   rb_define_method(cCoverage, "start", fast_cov_start, 0);
   rb_define_method(cCoverage, "stop", fast_cov_stop, 0);
-
-  // FastCov::Cache module (C-defined methods)
-  VALUE mCache = rb_define_module_under(mFastCov, "Cache");
-  rb_define_module_function(mCache, "data", cache_get_data, 0);
-  rb_define_module_function(mCache, "data=", cache_set_data, 1);
-  rb_define_module_function(mCache, "clear", cache_clear, 0);
 
   // FastCov::Utils module (C-defined methods)
   VALUE mUtils = rb_define_module_under(mFastCov, "Utils");

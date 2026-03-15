@@ -13,10 +13,11 @@ module FastCov
   # Note: This does NOT catch direct constant references like `Foo::Bar` in source
   # code - those compile to opt_getconstant_path bytecode and bypass const_get.
   #
-  # Register via: config.use FastCov::ConstGetTracker
-  # Options: root, ignored_path, threads (all default from config)
+  # Register via: coverage_map.use(FastCov::ConstGetTracker)
   class ConstGetTracker < AbstractTracker
     def install
+      return if Module.ancestors.include?(ConstGetPatch)
+
       Module.prepend(ConstGetPatch)
     end
 
