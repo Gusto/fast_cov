@@ -242,11 +242,12 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
   struct fast_cov_data *data;
   TypedData_Get_Struct(self, struct fast_cov_data, &fast_cov_data_type, data);
 
+  char *root = fast_cov_ruby_strndup(RSTRING_PTR(rb_root), RSTRING_LEN(rb_root));
+
   data->threads = threads;
   if (data->root) xfree(data->root);
+  data->root = root;
   data->root_len = RSTRING_LEN(rb_root);
-  data->root =
-      fast_cov_ruby_strndup(RSTRING_PTR(rb_root), data->root_len);
 
   if (data->ignored_paths) {
     long i;
@@ -271,8 +272,8 @@ static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
     }
 
     data->ignored_paths_count = ignored_paths_count;
-    data->ignored_paths = xmalloc(sizeof(char *) * data->ignored_paths_count);
-    data->ignored_path_lens = xmalloc(sizeof(long) * data->ignored_paths_count);
+    data->ignored_paths = xcalloc(data->ignored_paths_count, sizeof(char *));
+    data->ignored_path_lens = xcalloc(data->ignored_paths_count, sizeof(long));
 
     for (i = 0; i < data->ignored_paths_count; i++) {
       VALUE rb_ignored_path = rb_ary_entry(rb_ignored_paths, i);
