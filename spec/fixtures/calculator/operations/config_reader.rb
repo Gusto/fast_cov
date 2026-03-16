@@ -8,4 +8,12 @@ class ConfigReader
   def self.read_config
     File.read(config_path)
   end
+
+  def self.memoized_config
+    @memoized_config ||= read_config
+  end
+
+  def self.reset!
+    remove_instance_variable(:@memoized_config) if instance_variable_defined?(:@memoized_config)
+  end
 end

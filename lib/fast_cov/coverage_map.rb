@@ -10,11 +10,13 @@ module FastCov
     attr_accessor :threads
     attr_reader :ignored_paths
     attr_reader :root
+    attr_reader :connected_dependencies
 
     def initialize
       @root = Dir.pwd
       @threads = true
       @ignored_paths = []
+      @connected_dependencies = ConnectedDependencies.new(self)
       @trackers = []
       @native_coverage = nil
       @started = false
@@ -91,6 +93,7 @@ module FastCov
 
       result = Set.new(@native_coverage.stop.each_key)
       @trackers.reverse_each { |tracker| result.merge(tracker.stop) }
+      @connected_dependencies.expand(result)
       Utils.relativize_paths(result, normalized_root)
     ensure
       @native_coverage = nil

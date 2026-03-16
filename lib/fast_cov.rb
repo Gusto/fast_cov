@@ -4,6 +4,7 @@ require "fast_cov/fast_cov.#{RUBY_VERSION}"
 
 module FastCov
   autoload :VERSION, File.expand_path("fast_cov/version", __dir__)
+  autoload :ConnectedDependencies, File.expand_path("fast_cov/connected_dependencies", __dir__)
   autoload :CoverageMap, File.expand_path("fast_cov/coverage_map", __dir__)
   autoload :AbstractTracker, File.expand_path("fast_cov/trackers/abstract_tracker", __dir__)
   autoload :FileTracker, File.expand_path("fast_cov/trackers/file_tracker", __dir__)
