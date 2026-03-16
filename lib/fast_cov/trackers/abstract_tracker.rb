@@ -45,7 +45,7 @@ module FastCov
       path = normalize_path(abs_path)
       return unless @coverage_map.include_path?(path)
 
-      @coverage_map.connected_dependencies.connect(from: to, to: path) if to
+      @coverage_map.connect(from: to, to: path) if to
       @files.add(path) if on_record(path)
     end
 

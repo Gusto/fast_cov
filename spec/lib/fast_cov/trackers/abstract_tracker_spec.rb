@@ -10,10 +10,8 @@ RSpec.describe FastCov::AbstractTracker do
     allow(coverage_map).to receive(:include_path?) do |path|
       path.start_with?("/app") && !path.start_with?("/app/vendor")
     end
-    allow(coverage_map).to receive(:connected_dependencies).and_return(connected_dependencies)
+    allow(coverage_map).to receive(:connect)
   end
-
-  let(:connected_dependencies) { instance_double(FastCov::ConnectedDependencies, connect: nil) }
 
   describe "#initialize" do
     it "stores the coverage_map" do
@@ -121,7 +119,7 @@ RSpec.describe FastCov::AbstractTracker do
     it "records a connected dependency when `to` is provided" do
       tracker.record("/app/config/settings.yml", to: "/app/services/config_reader.rb")
 
-      expect(connected_dependencies).to have_received(:connect).with(
+      expect(coverage_map).to have_received(:connect).with(
         from: "/app/services/config_reader.rb",
         to: "/app/config/settings.yml"
       )
@@ -192,7 +190,7 @@ RSpec.describe FastCov::AbstractTracker do
       tracker.start
       described_class.record(to: "/app/services/config_reader.rb") { "/app/config/settings.yml" }
 
-      expect(connected_dependencies).to have_received(:connect).with(
+      expect(coverage_map).to have_received(:connect).with(
         from: "/app/services/config_reader.rb",
         to: "/app/config/settings.yml"
       )

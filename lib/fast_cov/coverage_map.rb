@@ -16,7 +16,7 @@ module FastCov
       @root = Dir.pwd
       @threads = true
       @ignored_paths = []
-      @connected_dependencies = ConnectedDependencies.new(self)
+      @connected_dependencies = ConnectedDependencies.new
       @trackers = []
       @native_coverage = nil
       @started = false
@@ -108,6 +108,16 @@ module FastCov
       normalized_ignored_paths.none? { |ignored_path| Utils.path_within?(path, ignored_path) }
     end
 
+    def connect(from:, to:)
+      source = normalize_path(from)
+      target = normalize_path(to)
+      return unless include_path?(source)
+      return unless include_path?(target)
+      return if source == target
+
+      @connected_dependencies.connect(from: source, to: target)
+    end
+
     private
 
     def normalized_root
@@ -136,6 +146,12 @@ module FastCov
 
     def absolute_path?(path)
       Pathname.new(path).absolute?
+    end
+
+    def normalize_path(path)
+      return if path.nil?
+
+      File.expand_path(path.to_s)
     end
 
     def cleanup_failed_start

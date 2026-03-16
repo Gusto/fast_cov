@@ -5,20 +5,14 @@ require "thread"
 
 module FastCov
   class ConnectedDependencies
-    def initialize(coverage_map)
-      @coverage_map = coverage_map
+    def initialize
       @connections = {}
       @mutex = Mutex.new
     end
 
     def connect(from:, to:)
-      source = normalize_path(from)
-      return unless source
-      return unless @coverage_map.include_path?(source)
-      return if source == to
-
       @mutex.synchronize do
-        (@connections[source] ||= {})[to] = true
+        (@connections[from] ||= {})[to] = true
       end
     end
 
@@ -41,14 +35,6 @@ module FastCov
       end
 
       paths
-    end
-
-    private
-
-    def normalize_path(path)
-      return if path.nil?
-
-      File.expand_path(path.to_s)
     end
   end
 end

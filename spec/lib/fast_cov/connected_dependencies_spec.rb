@@ -1,39 +1,15 @@
 # frozen_string_literal: true
 
 RSpec.describe FastCov::ConnectedDependencies do
-  let(:coverage_map) { instance_double(FastCov::CoverageMap) }
-
-  subject(:connected_dependencies) { described_class.new(coverage_map) }
-
-  before do
-    allow(coverage_map).to receive(:include_path?) do |path|
-      path.start_with?("/app") && !path.start_with?("/app/vendor")
-    end
-  end
+  subject(:connected_dependencies) { described_class.new }
 
   describe "#connect" do
-    it "stores connections for valid paths" do
+    it "stores connections" do
       connected_dependencies.connect(from: "/app/services/config_reader.rb", to: "/app/config/settings.yml")
 
       expanded_paths = connected_dependencies.expand(Set["/app/services/config_reader.rb"])
 
       expect(expanded_paths).to include("/app/config/settings.yml")
-    end
-
-    it "ignores invalid source paths" do
-      connected_dependencies.connect(from: "/other/file.rb", to: "/app/config/settings.yml")
-
-      expanded_paths = connected_dependencies.expand(Set["/other/file.rb"])
-
-      expect(expanded_paths).not_to include("/app/config/settings.yml")
-    end
-
-    it "ignores self-referential connections" do
-      connected_dependencies.connect(from: "/app/services/config_reader.rb", to: "/app/services/config_reader.rb")
-
-      expanded_paths = connected_dependencies.expand(Set["/app/services/config_reader.rb"])
-
-      expect(expanded_paths).to eq(Set["/app/services/config_reader.rb"])
     end
   end
 
