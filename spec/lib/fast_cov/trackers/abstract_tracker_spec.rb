@@ -1,38 +1,20 @@
 # frozen_string_literal: true
 
 RSpec.describe FastCov::AbstractTracker do
-  let(:config) do
-    double("config",
-      root: "/app",
-      ignored_path: "/app/vendor",
-      threads: true
-    )
-  end
+  let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: true) }
 
-  subject(:tracker) { described_class.new(config) }
+  subject(:tracker) { described_class.new(coverage_map) }
 
   before do
     described_class.reset
+    allow(coverage_map).to receive(:include_path?) do |path|
+      path.start_with?("/app") && !path.start_with?("/app/vendor")
+    end
   end
 
   describe "#initialize" do
-    it "reads root from config" do
-      expect(tracker.instance_variable_get(:@root)).to eq("/app")
-    end
-
-    it "reads ignored_path from config" do
-      expect(tracker.instance_variable_get(:@ignored_path)).to eq("/app/vendor")
-    end
-
-    it "reads threads from config" do
-      expect(tracker.instance_variable_get(:@threads)).to eq(true)
-    end
-
-    it "allows options to override config" do
-      tracker = described_class.new(config, root: "/other", ignored_path: nil, threads: false)
-      expect(tracker.instance_variable_get(:@root)).to eq("/other")
-      expect(tracker.instance_variable_get(:@ignored_path)).to be_nil
-      expect(tracker.instance_variable_get(:@threads)).to eq(false)
+    it "stores the coverage_map" do
+      expect(tracker.instance_variable_get(:@coverage_map)).to eq(coverage_map)
     end
   end
 
@@ -55,7 +37,7 @@ RSpec.describe FastCov::AbstractTracker do
     end
 
     context "with threads: false" do
-      let(:config) { double("config", root: "/app", ignored_path: nil, threads: false) }
+      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false) }
 
       it "stores the starting thread" do
         tracker.start
@@ -101,19 +83,25 @@ RSpec.describe FastCov::AbstractTracker do
   describe "#record" do
     before { tracker.start }
 
-    it "records files within root" do
+    it "records files within the coverage map" do
       tracker.record("/app/models/user.rb")
       expect(tracker.instance_variable_get(:@files)).to include("/app/models/user.rb")
     end
 
-    it "ignores files outside root" do
+    it "ignores files outside the coverage map" do
       tracker.record("/other/file.rb")
       expect(tracker.instance_variable_get(:@files)).to be_empty
     end
 
-    it "ignores files within ignored_path" do
+    it "ignores files within ignored_paths" do
       tracker.record("/app/vendor/gem.rb")
       expect(tracker.instance_variable_get(:@files)).to be_empty
+    end
+
+    it "normalizes recorded paths" do
+      tracker.record("/app/../app/foo.rb")
+
+      expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
     end
 
     it "calls on_record hook and respects its return value" do
@@ -128,7 +116,11 @@ RSpec.describe FastCov::AbstractTracker do
     end
 
     context "with threads: false" do
-      let(:config) { double("config", root: "/app", ignored_path: nil, threads: false) }
+      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false) }
+
+      before do
+        allow(coverage_map).to receive(:include_path?).and_return(true)
+      end
 
       it "records from the starting thread" do
         tracker.start
@@ -218,8 +210,8 @@ RSpec.describe FastCov::AbstractTracker do
     let(:subclass_b) { Class.new(described_class) }
 
     it "each subclass has its own active tracker" do
-      tracker_a = subclass_a.new(config)
-      tracker_b = subclass_b.new(config)
+      tracker_a = subclass_a.new(coverage_map)
+      tracker_b = subclass_b.new(coverage_map)
 
       tracker_a.start
       tracker_b.start

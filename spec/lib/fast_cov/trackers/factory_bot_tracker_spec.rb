@@ -7,7 +7,6 @@ RSpec.describe FastCov::FactoryBotTracker do
   let(:factory_file) { fixtures_path("factory_bot", "factories.rb") }
 
   before(:all) do
-    # Load our test factories once
     require_relative "../../../fixtures/factory_bot/factories"
   end
 
@@ -15,15 +14,17 @@ RSpec.describe FastCov::FactoryBotTracker do
     FastCov::FactoryBotTracker.reset
   end
 
-  let(:config) do
-    double("config",
-      root: fixtures_path("factory_bot"),
-      ignored_path: nil,
-      threads: true
-    )
+  let(:coverage_map) do
+    instance_double(FastCov::CoverageMap, threads: true)
   end
 
-  subject(:tracker) { described_class.new(config) }
+  subject(:tracker) { described_class.new(coverage_map) }
+
+  before do
+    allow(coverage_map).to receive(:include_path?) do |path|
+      path.start_with?(fixtures_path("factory_bot"))
+    end
+  end
 
   describe "#install" do
     it "patches FactoryBot.factories with RegistryPatch" do
@@ -71,32 +72,9 @@ RSpec.describe FastCov::FactoryBotTracker do
     end
   end
 
-  describe "root filtering" do
-    it "only records files within root" do
-      other_root_config = double("config",
-        root: "/some/other/path",
-        ignored_path: nil,
-        threads: true
-      )
-      tracker = described_class.new(other_root_config)
-      tracker.install
-
-      tracker.start
-      FactoryBot.build(:user)
-      result = tracker.stop
-
-      expect(result).to be_empty
-    end
-  end
-
-  describe "ignored_path filtering" do
-    it "excludes files under ignored_path" do
-      ignored_config = double("config",
-        root: fixtures_path,
-        ignored_path: fixtures_path("factory_bot"),
-        threads: true
-      )
-      tracker = described_class.new(ignored_config)
+  describe "coverage map filtering" do
+    it "only records files the coverage map includes" do
+      allow(coverage_map).to receive(:include_path?).and_return(false)
       tracker.install
 
       tracker.start
@@ -109,14 +87,6 @@ RSpec.describe FastCov::FactoryBotTracker do
 
   describe "threading behavior" do
     context "with threads: true (global tracking)" do
-      let(:config) do
-        double("config",
-          root: fixtures_path("factory_bot"),
-          ignored_path: nil,
-          threads: true
-        )
-      end
-
       it "records factory usage from any thread" do
         tracker.install
         tracker.start
@@ -130,12 +100,10 @@ RSpec.describe FastCov::FactoryBotTracker do
     end
 
     context "with threads: false (single-thread tracking)" do
-      let(:config) do
-        double("config",
-          root: fixtures_path("factory_bot"),
-          ignored_path: nil,
-          threads: false
-        )
+      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false) }
+
+      before do
+        allow(coverage_map).to receive(:include_path?).and_return(true)
       end
 
       it "only records factory usage from the starting thread" do
@@ -162,11 +130,10 @@ RSpec.describe FastCov::FactoryBotTracker do
 
   describe "when FactoryBot is not defined" do
     it "raises LoadError with helpful message" do
-      # Temporarily hide FactoryBot
       factory_bot = Object.send(:remove_const, :FactoryBot)
 
       begin
-        tracker = described_class.new(config)
+        tracker = described_class.new(coverage_map)
         expect { tracker.install }.to raise_error(
           LoadError,
           /factory_bot gem/

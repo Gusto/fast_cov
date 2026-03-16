@@ -6,10 +6,11 @@ module FastCov
   # Tracks files read from disk during coverage (JSON, YAML, .rb templates, etc.)
   # via File.read and File.open.
   #
-  # Register via: config.use FastCov::FileTracker
-  # Options: root, ignored_path, threads (all default from config)
+  # Register via: coverage_map.use(FastCov::FileTracker)
   class FileTracker < AbstractTracker
     def install
+      return if File.singleton_class.ancestors.include?(FilePatch)
+
       File.singleton_class.prepend(FilePatch)
     end
 

@@ -16,8 +16,8 @@ RSpec.configure do |config|
   config.include FileHelpers
 
   config.before(:each) do
-    FastCov::Cache.clear
     FastCov::FileTracker.reset
-    FastCov.reset
+    FastCov::FactoryBotTracker.reset
+    FastCov::ConstGetTracker.reset
   end
 end
