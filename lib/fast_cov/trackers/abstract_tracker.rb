@@ -39,12 +39,13 @@ module FastCov
       result
     end
 
-    def record(abs_path)
+    def record(abs_path, to: nil)
       return if !@coverage_map.threads && Thread.current != @started_thread
 
       path = normalize_path(abs_path)
       return unless @coverage_map.include_path?(path)
 
+      @coverage_map.connect(from: to, to: path) if to
       @files.add(path) if on_record(path)
     end
 
@@ -69,19 +70,12 @@ module FastCov
     class << self
       attr_accessor :active
 
-      # Record a file path. Accepts a path directly or a block that returns the path.
-      # If block given, it's only executed when tracker is active (avoids expensive work).
-      # Nil values are ignored.
-      #
-      #   record("/path/to/file.rb")           # direct path
-      #   record { expensive_lookup }          # lazy evaluation
-      #   record("/path") { fallback }         # path takes precedence
-      #
-      def record(abs_path = nil)
+      def record(to: nil)
         return unless active
+        return unless block_given?
 
-        path = abs_path || (yield if block_given?)
-        active.record(path) if path
+        path = yield
+        active.record(path, to: to) if path
       end
 
       def reset

@@ -25,6 +25,7 @@ RSpec.describe FastCov::ConstGetTracker do
     allow(coverage_map).to receive(:include_path?) do |path|
       path.start_with?(fixtures_path("const_get"))
     end
+    allow(coverage_map).to receive(:connect)
   end
 
   describe "#install" do
@@ -140,6 +141,7 @@ RSpec.describe FastCov::ConstGetTracker do
 
       before do
         allow(coverage_map).to receive(:include_path?).and_return(true)
+        allow(coverage_map).to receive(:connect)
       end
 
       it "only records const_get from the starting thread" do

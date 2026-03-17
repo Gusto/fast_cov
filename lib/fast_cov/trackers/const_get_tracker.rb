@@ -23,11 +23,9 @@ module FastCov
 
     module ConstGetPatch
       def const_get(name, inherit = true)
+        source = caller_locations(1, 1).first&.absolute_path
         result = super
-        FastCov::ConstGetTracker.record do
-          location = self.const_source_location(name, inherit) rescue nil
-          location&.first
-        end
+        FastCov::ConstGetTracker.record(to: source) { const_source_location(name, inherit)&.first }
         result
       end
     end

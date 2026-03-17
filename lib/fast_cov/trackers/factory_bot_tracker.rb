@@ -42,9 +42,7 @@ module FastCov
           next unless block.is_a?(Proc)
 
           location = block.source_location
-          next unless location
-
-          record(location[0])
+          record { location&.first }
         end
       end
     end
