@@ -123,32 +123,18 @@ This API is mainly useful for internal use and low-level tests. `CoverageMap` is
 
 ## StaticMap
 
-`FastCov::StaticMap` is a separate build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and returns a direct dependency graph for every reachable file.
+`FastCov::StaticMap` is a separate build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and returns a transitive dependency map for each input file.
 
 ```ruby
-graph = FastCov::StaticMap.build(
+map = FastCov::StaticMap.build(
   files: ["spec/**/*_spec.rb", "packs/**/spec/**/*_spec.rb"],
   root: Rails.root
 )
 
 # => {
-#   "/app/spec/models/user_spec.rb" => ["/app/app/models/user.rb"],
-#   "/app/app/models/user.rb" => ["/app/app/models/account.rb"]
-# }
-```
-
-If you specifically need the older transitive closure shape, use `build_transitive`:
-
-```ruby
-map = FastCov::StaticMap.build_transitive(
-  files: "spec/**/*_spec.rb",
-  root: Rails.root
-)
-
-# => {
 #   "/app/spec/models/user_spec.rb" => [
-#     "/app/app/models/user.rb",
-#     "/app/app/models/account.rb"
+#     "/app/app/models/account.rb",
+#     "/app/app/models/user.rb"
 #   ]
 # }
 ```
@@ -163,8 +149,7 @@ map = FastCov::StaticMap.build_transitive(
 
 #### How it works
 
-- `build` traverses reachable files once and returns only direct file-to-file edges
-- `build_transitive` computes a transitive closure for each input file
+- `build` computes a transitive closure for each input file
 - Shared parse, constant-resolution, and direct-dependency caches are reused within a builder instance
 - Resolves each reference from most-specific lexical candidate to least-specific candidate
 - Uses `const_get` and `const_source_location` to resolve literal constant references to backing source files
@@ -172,7 +157,7 @@ map = FastCov::StaticMap.build_transitive(
 
 This is intended for a booted application process. It will execute autoloads while resolving constants, and it will not see dynamic constant lookups that are not expressed as literal constants in the source.
 
-For CI aggregation, `build` is usually the better primitive: callers can merge its direct edges with runtime coverage mappings instead of materializing a full transitive spec-to-dependency map in Ruby.
+This is the higher-fanout output shape: if your caller really wants a direct graph instead of full closures, that would need a separate API.
 
 ## Writing custom trackers
 

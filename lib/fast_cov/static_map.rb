@@ -10,10 +10,6 @@ module FastCov
       def build(files:, root: Dir.pwd, ignored_paths: [])
         new(files: files, root: root, ignored_paths: ignored_paths).build
       end
-
-      def build_transitive(files:, root: Dir.pwd, ignored_paths: [])
-        new(files: files, root: root, ignored_paths: ignored_paths).build_transitive
-      end
     end
 
     def initialize(files: nil, root:, ignored_paths:)
@@ -28,32 +24,6 @@ module FastCov
     end
 
     def build(files: @files)
-      graph = {}
-      queue = expand_files(files).select { |file| processable_file?(file) }
-      processed = {}
-      index = 0
-
-      while index < queue.length
-        file = queue[index]
-        index += 1
-        next if processed[file]
-
-        processed[file] = true
-        dependencies = direct_dependencies_for_file(file)
-        graph[file] = dependencies unless dependencies.empty?
-
-        dependencies.each do |dependency|
-          next if processed[dependency]
-          next unless processable_file?(dependency)
-
-          queue << dependency
-        end
-      end
-
-      graph
-    end
-
-    def build_transitive(files: @files)
       expand_files(files).each_with_object({}) do |file, mapping|
         next unless processable_file?(file)
 
