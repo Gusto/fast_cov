@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "pathname"
-
 module FastCov
   class CoverageMap
     class ConfigurationError < StandardError; end
@@ -144,7 +142,7 @@ module FastCov
     end
 
     def absolute_path?(path)
-      Pathname.new(path).absolute?
+      File.absolute_path?(path.to_s)
     end
 
     def normalize_path(path)
