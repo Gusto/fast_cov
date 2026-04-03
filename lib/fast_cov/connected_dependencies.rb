@@ -1,8 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-require "thread"
-
 module FastCov
   class ConnectedDependencies
     def initialize
