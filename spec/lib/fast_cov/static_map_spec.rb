@@ -7,30 +7,25 @@ require "tmpdir"
 
 RSpec.describe FastCov::StaticMap do
   describe ".build" do
-    it "builds through an instance" do
-      instance = described_class.new(files: [], root: Dir.pwd, ignored_paths: [])
+    it "returns a StaticMap instance" do
+      map = described_class.build(files: [], root: Dir.pwd, ignored_paths: [])
 
-      allow(described_class).to receive(:new).and_return(instance)
-      allow(instance).to receive(:build).and_return({})
-
-      expect(described_class.build(files: [], root: Dir.pwd, ignored_paths: [])).to eq({})
-      expect(described_class).to have_received(:new).with(files: [], root: Dir.pwd, ignored_paths: [])
-      expect(instance).to have_received(:build)
+      expect(map).to be_a(described_class)
     end
 
-    it "builds a transitive dependency map for files" do
+    it "builds a direct dependency graph for each reachable file" do
       with_static_map_fixture do |root, file|
-        mapping = described_class.build(
-          files: file,
-          root: root
-        )
+        entry_point_file = File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
+        dependency_file = File.join(root, "app/static_map_autoload_fixture/dependency.rb")
+        leaf_file = File.join(root, "app/static_map_autoload_fixture/leaf.rb")
 
-        expect(mapping).to eq(
-          file => [
-            File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
-            File.join(root, "app/static_map_autoload_fixture/entry_point.rb"),
-            File.join(root, "app/static_map_autoload_fixture/leaf.rb")
-          ]
+        map = described_class.build(files: file, root: root)
+
+        expect(map.direct_graph).to eq(
+          file => [entry_point_file],
+          entry_point_file => [dependency_file],
+          dependency_file => [leaf_file],
+          leaf_file => []
         )
       end
     end
@@ -49,20 +44,13 @@ RSpec.describe FastCov::StaticMap do
 
     it "expands relative file globs against root" do
       with_static_map_fixture do |root, file|
-        expected_dependencies = [
-          File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
-          File.join(root, "app/static_map_autoload_fixture/entry_point.rb"),
-          File.join(root, "app/static_map_autoload_fixture/leaf.rb")
-        ]
+        entry_point_file = File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
 
         Dir.mktmpdir("fast_cov_static_map_cwd") do |cwd|
           Dir.chdir(cwd) do
-            mapping = described_class.build(
-              files: "spec/*_spec.rb",
-              root: root
-            )
+            map = described_class.build(files: "spec/*_spec.rb", root: root)
 
-            expect(mapping).to include(file => expected_dependencies)
+            expect(map.dependencies(file)).to eq([entry_point_file])
           end
         end
       end
@@ -70,22 +58,15 @@ RSpec.describe FastCov::StaticMap do
 
     it "accepts root as a Pathname" do
       with_static_map_fixture do |root, file|
-        expected_dependencies = [
-          File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
-          File.join(root, "app/static_map_autoload_fixture/entry_point.rb"),
-          File.join(root, "app/static_map_autoload_fixture/leaf.rb")
-        ]
+        entry_point_file = File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
 
-        mapping = described_class.build(
-          files: "spec/*_spec.rb",
-          root: Pathname.new(root)
-        )
+        map = described_class.build(files: "spec/*_spec.rb", root: Pathname.new(root))
 
-        expect(mapping).to include(file => expected_dependencies)
+        expect(map.dependencies(file)).to eq([entry_point_file])
       end
     end
 
-    it "caches missing constants for the process" do
+    it "caches missing constants via prefix-level negative caching" do
       Dir.mktmpdir("fast_cov_static_map") do |root|
         entrypoint_a = File.join(root, "spec/one_spec.rb")
         entrypoint_b = File.join(root, "spec/two_spec.rb")
@@ -94,76 +75,129 @@ RSpec.describe FastCov::StaticMap do
           MissingStaticMapFixture::Dependency
         RUBY
         write_file(entrypoint_b, <<~RUBY)
-          MissingStaticMapFixture::Dependency
+          MissingStaticMapFixture::AnotherDependency
         RUBY
 
-        allow(Object).to receive(:const_get).and_call_original
+        allow(Object).to receive(:const_defined?).and_call_original
 
-        mapping = described_class.build(
+        map = described_class.build(
           files: File.join(root, "spec/*_spec.rb"),
           root: root
         )
 
-        expect(mapping).to eq(
-          entrypoint_a => [],
-          entrypoint_b => []
-        )
-        expect(Object).to have_received(:const_get).with("MissingStaticMapFixture::Dependency").once
+        expect(map.dependencies(entrypoint_a)).to eq([])
+        expect(map.dependencies(entrypoint_b)).to eq([])
+
+        # MissingStaticMapFixture is checked once, then the prefix cache kicks in
+        expect(Object).to have_received(:const_defined?).with("MissingStaticMapFixture", false).once
       end
     end
 
-    it "treats unexpected autoload errors as misses" do
+    it "traverses discovered dependencies only once even with cycles" do
       Dir.mktmpdir("fast_cov_static_map") do |root|
-        spec_file = File.join(root, "spec/autoload_error_spec.rb")
-        write_file(spec_file, <<~RUBY)
-          AutoloadErrorFixture::Dependency
-        RUBY
+        spec_file = File.join(root, "spec/cycle_spec.rb")
+        file_a = File.join(root, "app/cycle/a.rb")
+        file_b = File.join(root, "app/cycle/b.rb")
+        synthetic_files = [spec_file, file_a, file_b].to_set
 
-        allow(Object).to receive(:const_get).and_wrap_original do |original, const_name, *rest|
-          if const_name == "AutoloadErrorFixture::Dependency"
-            raise Errno::ENOENT, "autoload side effect"
-          end
+        write_file(spec_file, "# synthetic\n")
 
-          original.call(const_name, *rest)
+        allow(File).to receive(:file?).and_wrap_original do |original, path|
+          synthetic_files.include?(path) || original.call(path)
         end
 
-        expect(described_class.build(files: spec_file, root: root)).to eq(spec_file => [])
+        allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract) do |path|
+          case path
+          when spec_file
+            [["CycleConstA"]]
+          when file_a
+            [["CycleConstB"]]
+          when file_b
+            [["CycleConstA"]]
+          else
+            raise "unexpected file: #{path}"
+          end
+        end
+
+        allow_any_instance_of(described_class).to receive(:constant_defined?).and_return(true)
+        allow(Object).to receive(:const_source_location) do |const_name|
+          case const_name
+          when "CycleConstA"
+            [file_a, 1]
+          when "CycleConstB"
+            [file_b, 1]
+          end
+        end
+
+        map = described_class.build(files: spec_file, root: root)
+
+        expect(map.direct_graph).to eq(
+          spec_file => [file_a],
+          file_a => [file_b],
+          file_b => [file_a]
+        )
       end
     end
 
     it "respects ignored paths while traversing the graph" do
       with_static_map_fixture do |root, file|
-        leaf_file = File.join(root, "app/static_map_autoload_fixture/leaf.rb")
+        entry_point_file = File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
+        dependency_file = File.join(root, "app/static_map_autoload_fixture/dependency.rb")
 
-        mapping = described_class.build(
-          files: file,
-          root: root,
-          ignored_paths: leaf_file
-        )
+        map = described_class.build(files: file, root: root, ignored_paths: File.join(root, "app/static_map_autoload_fixture/leaf.rb"))
 
-        expect(mapping).to eq(
-          file => [
-            File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
-            File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
-          ]
+        expect(map.direct_graph).to eq(
+          file => [entry_point_file],
+          entry_point_file => [dependency_file],
+          dependency_file => []
         )
       end
     end
+  end
 
-    it "excludes ignored paths from the traversal" do
+  describe "#dependencies" do
+    it "returns direct dependencies for a file" do
       with_static_map_fixture do |root, file|
-        mapping = described_class.build(
+        entry_point_file = File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
+
+        map = described_class.build(files: file, root: root)
+
+        expect(map.dependencies(file)).to eq([entry_point_file])
+      end
+    end
+
+    it "returns an empty array for unknown files" do
+      map = described_class.build(files: [], root: Dir.pwd)
+
+      expect(map.dependencies("/nonexistent/file.rb")).to eq([])
+    end
+  end
+
+  describe "#transitive_dependencies" do
+    it "computes the transitive closure for a file" do
+      with_static_map_fixture do |root, file|
+        map = described_class.build(files: file, root: root)
+
+        expect(map.transitive_dependencies(file)).to eq([
+          File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
+          File.join(root, "app/static_map_autoload_fixture/entry_point.rb"),
+          File.join(root, "app/static_map_autoload_fixture/leaf.rb")
+        ])
+      end
+    end
+
+    it "excludes ignored paths from the transitive closure" do
+      with_static_map_fixture do |root, file|
+        map = described_class.build(
           files: file,
           root: root,
           ignored_paths: File.join(root, "app/static_map_autoload_fixture/leaf.rb")
         )
 
-        expect(mapping).to eq(
-          file => [
-            File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
-            File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
-          ]
-        )
+        expect(map.transitive_dependencies(file)).to eq([
+          File.join(root, "app/static_map_autoload_fixture/dependency.rb"),
+          File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
+        ])
       end
     end
 
@@ -199,18 +233,18 @@ RSpec.describe FastCov::StaticMap do
         allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract) do |path|
           extracts.fetch(path)
         end
-        allow_any_instance_of(described_class).to receive(:constant_loaded?).and_return(true)
+        allow_any_instance_of(described_class).to receive(:constant_defined?).and_return(true)
         allow(Object).to receive(:const_source_location) do |const_name|
           locations[const_name]
         end
 
-        mapping = described_class.build(files: spec_file, root: root)
+        map = described_class.build(files: spec_file, root: root)
 
-        expect(mapping.fetch(spec_file)).to eq(dependency_files.sort)
+        expect(map.transitive_dependencies(spec_file)).to eq(dependency_files.sort)
       end
     end
 
-    it "preserves cycle handling for transitive dependencies" do
+    it "handles cycles in transitive dependencies" do
       Dir.mktmpdir("fast_cov_static_map") do |root|
         spec_file = File.join(root, "spec/cycle_spec.rb")
         file_a = File.join(root, "app/cycle/a.rb")
@@ -236,7 +270,7 @@ RSpec.describe FastCov::StaticMap do
           end
         end
 
-        allow_any_instance_of(described_class).to receive(:constant_loaded?).and_return(true)
+        allow_any_instance_of(described_class).to receive(:constant_defined?).and_return(true)
         allow(Object).to receive(:const_source_location) do |const_name|
           case const_name
           when "CycleConstA"
@@ -246,10 +280,16 @@ RSpec.describe FastCov::StaticMap do
           end
         end
 
-        mapping = described_class.build(files: spec_file, root: root)
+        map = described_class.build(files: spec_file, root: root)
 
-        expect(mapping.fetch(spec_file)).to eq([file_a, file_b])
+        expect(map.transitive_dependencies(spec_file)).to eq([file_a, file_b])
       end
+    end
+
+    it "returns an empty array for unknown files" do
+      map = described_class.build(files: [], root: Dir.pwd)
+
+      expect(map.transitive_dependencies("/nonexistent/file.rb")).to eq([])
     end
   end
 

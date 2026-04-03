@@ -8,12 +8,11 @@ module FastCov
 
     class << self
       def build(files:, root: Dir.pwd, ignored_paths: [])
-        new(files: files, root: root, ignored_paths: ignored_paths).build
+        new(root: root, ignored_paths: ignored_paths).build(files: files)
       end
     end
 
-    def initialize(files: nil, root:, ignored_paths:)
-      @files = files
+    def initialize(root:, ignored_paths: [])
       @root = share_path(root)
       @ignored_paths = normalize_ignored_paths(ignored_paths)
       @parsed_refs_by_file = {}
@@ -21,28 +20,58 @@ module FastCov
       @missed_consts = {}
       @direct_dependencies_by_file = {}
       @closure_by_file = {}
+      @graph = {}
     end
 
-    def build(files: @files)
-      expand_files(files).each_with_object({}) do |file, mapping|
-        next unless processable_file?(file)
+    def build(files:)
+      queue = expand_files(files).select { |file| processable_file?(file) }
+      processed = {}
+      index = 0
 
-        dependencies = resolve_dependencies_for_file(file).reject { |path| path == file }
-        mapping[file] = dependencies
+      while index < queue.length
+        file = queue[index]
+        index += 1
+        next if processed[file]
+
+        processed[file] = true
+        dependencies = direct_dependencies_for_file(file)
+        @graph[file] = dependencies
+
+        dependencies.each do |dependency|
+          next if processed[dependency]
+          next unless processable_file?(dependency)
+
+          queue << dependency
+        end
       end
+
+      self
+    end
+
+    def direct_graph
+      @graph
+    end
+
+    def dependencies(file)
+      @graph.fetch(share_path(file), EMPTY_ARRAY)
+    end
+
+    def transitive_dependencies(file)
+      file = share_path(file)
+      resolve_transitive_dependencies(file)
     end
 
     private
 
-    attr_reader :closure_by_file, :direct_dependencies_by_file, :files, :ignored_paths,
+    attr_reader :closure_by_file, :direct_dependencies_by_file, :ignored_paths,
                 :missed_consts, :parsed_refs_by_file, :resolved_file_by_const, :root
 
-    def resolve_dependencies_for_file(file)
+    def resolve_transitive_dependencies(file)
       cached = closure_by_file[file]
       return cached if cached
 
-      direct_dependencies_by_file_key = {}
       visiting = {}
+      local_deps = {}
       stack = [[file, :enter]]
 
       until stack.empty?
@@ -51,7 +80,7 @@ module FastCov
         if state == :exit
           dependencies = {}
 
-          direct_dependencies_by_file_key.fetch(current_file, EMPTY_ARRAY).each do |dependency_file|
+          @graph.fetch(current_file, EMPTY_ARRAY).each do |dependency_file|
             dependencies[dependency_file] = true
 
             closure_by_file.fetch(dependency_file, EMPTY_ARRAY).each do |transitive_dependency|
@@ -69,12 +98,9 @@ module FastCov
         next if visiting[current_file]
 
         visiting[current_file] = true
-        direct_dependencies = direct_dependencies_for_file(current_file)
-        direct_dependencies_by_file_key[current_file] = direct_dependencies
-
         stack << [current_file, :exit]
 
-        direct_dependencies.reverse_each do |dependency_file|
+        @graph.fetch(current_file, EMPTY_ARRAY).reverse_each do |dependency_file|
           next if closure_by_file.key?(dependency_file)
           next if visiting[dependency_file]
 
@@ -100,8 +126,7 @@ module FastCov
       cached = resolved_file_by_const[shared_const_name]
       return cached if cached
       return nil if missed_consts.key?(shared_const_name)
-
-      ensure_constant_loaded(shared_const_name) unless constant_loaded?(shared_const_name)
+      return cache_miss(shared_const_name) unless constant_defined?(shared_const_name)
 
       source_location = Object.const_source_location(shared_const_name)
       file = source_location&.first
@@ -117,16 +142,24 @@ module FastCov
       nil
     end
 
-    def ensure_constant_loaded(const_name)
-      Object.const_get(const_name)
-    end
-
-    def constant_loaded?(const_name)
+    def constant_defined?(const_name)
       current = Object
+      prefix = +""
 
-      const_name.split("::").each do |segment|
-        return false if current.autoload?(segment)
-        return false unless current.const_defined?(segment, false)
+      const_name.split("::").each_with_index do |segment, index|
+        prefix << "::" unless index.zero?
+        prefix << segment
+
+        if missed_consts.key?(prefix)
+          cache_miss(const_name) unless prefix == const_name
+          return false
+        end
+
+        unless current.const_defined?(segment, false)
+          cache_miss(-(prefix.dup))
+          cache_miss(const_name) unless prefix == const_name
+          return false
+        end
 
         current = current.const_get(segment, false)
       end
@@ -167,7 +200,7 @@ module FastCov
       File.file?(file) && include_path?(file)
     end
 
-    def expand_files(patterns = files)
+    def expand_files(patterns)
       Array(patterns)
         .flat_map do |pattern|
           expanded_pattern = if pattern.to_s.start_with?("/")
