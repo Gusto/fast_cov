@@ -17,7 +17,8 @@ module FastCov
     end
 
     def build(*patterns)
-      queue = expand_files(patterns.flatten).select { |file| processable_file?(file) }
+      input_files = expand_files(patterns.flatten).select { |file| processable_file?(file) }
+      queue = input_files.dup
       processed = {}
       index = 0
 
@@ -39,7 +40,7 @@ module FastCov
         end
       end
 
-      self
+      input_files.flat_map { |file| dependencies(file) }.uniq
     end
 
     def direct_graph
