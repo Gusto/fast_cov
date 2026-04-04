@@ -127,7 +127,7 @@ This API is mainly useful for internal use and low-level tests. `CoverageMap` is
 
 ```ruby
 static_map = FastCov::StaticMap.new(root: Rails.root)
-static_map.build(files: ["spec/**/*_spec.rb"])
+static_map.build("spec/**/*_spec.rb")
 
 # Direct dependencies for a single file
 static_map.dependencies("/app/spec/models/user_spec.rb")
@@ -150,7 +150,7 @@ The instance caches constant resolution results, so reusing the same instance ac
 |---|---|---|---|
 | `root` | String or Pathname | required | Absolute project root. Only resolved files under this path are included. |
 | `ignored_paths` | String or Array<String> | `[]` | Files or directories to exclude from the graph and recursive traversal. |
-| `files` (on `build`) | String or Array<String> | required | Glob or file list to traverse. Relative paths are expanded against `root`. |
+| `*patterns` (on `build`) | String(s) or Array | required | File paths or globs to traverse. Relative paths are expanded against `root`. |
 
 #### How it works
 

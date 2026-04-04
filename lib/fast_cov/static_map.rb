@@ -15,8 +15,8 @@ module FastCov
       @graph = {}
     end
 
-    def build(files:)
-      queue = expand_files(files).select { |file| processable_file?(file) }
+    def build(*patterns)
+      queue = expand_files(patterns.flatten).select { |file| processable_file?(file) }
       processed = {}
       index = 0
 
