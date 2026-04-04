@@ -6,12 +6,6 @@ module FastCov
 
     autoload :ReferenceExtractor, "fast_cov/static_map/reference_extractor"
 
-    class << self
-      def build(files:, root: Dir.pwd, ignored_paths: [])
-        new(root: root, ignored_paths: ignored_paths).build(files: files)
-      end
-    end
-
     def initialize(root:, ignored_paths: [])
       @root = share_path(root)
       @ignored_paths = normalize_ignored_paths(ignored_paths)

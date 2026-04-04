@@ -123,41 +123,45 @@ This API is mainly useful for internal use and low-level tests. `CoverageMap` is
 
 ## StaticMap
 
-`FastCov::StaticMap` is a separate build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and returns a transitive dependency map for each input file.
+`FastCov::StaticMap` is a build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and builds a direct dependency graph. Transitive closures are computed lazily on demand.
 
 ```ruby
-map = FastCov::StaticMap.build(
-  files: ["spec/**/*_spec.rb", "packs/**/spec/**/*_spec.rb"],
-  root: Rails.root
-)
+static_map = FastCov::StaticMap.new(root: Rails.root)
+static_map.build(files: ["spec/**/*_spec.rb"])
 
-# => {
-#   "/app/spec/models/user_spec.rb" => [
-#     "/app/app/models/account.rb",
-#     "/app/app/models/user.rb"
-#   ]
-# }
+# Direct dependencies for a single file
+static_map.dependencies("/app/spec/models/user_spec.rb")
+# => ["/app/app/models/user.rb"]
+
+# Transitive closure (computed and cached on first call)
+static_map.transitive_dependencies("/app/spec/models/user_spec.rb")
+# => ["/app/app/models/account.rb", "/app/app/models/user.rb"]
+
+# Raw direct graph
+static_map.direct_graph
+# => { "/app/spec/models/user_spec.rb" => ["/app/app/models/user.rb"], ... }
 ```
+
+The instance caches constant resolution results, so reusing the same instance across multiple `build` calls is efficient.
 
 #### Options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `files` | String or Array<String> | required | Glob or file list to traverse. Relative paths are expanded against `root`. |
-| `root` | String or Pathname | `Dir.pwd` | Absolute project root. Only resolved files under this path are included. |
-| `ignored_paths` | String or Array<String> | `[]` | Files or directories to exclude from the returned map and recursive traversal. |
+| `root` | String or Pathname | required | Absolute project root. Only resolved files under this path are included. |
+| `ignored_paths` | String or Array<String> | `[]` | Files or directories to exclude from the graph and recursive traversal. |
+| `files` (on `build`) | String or Array<String> | required | Glob or file list to traverse. Relative paths are expanded against `root`. |
 
 #### How it works
 
-- `build` computes a transitive closure for each input file
-- Shared parse, constant-resolution, and direct-dependency caches are reused within a builder instance
-- Resolves each reference from most-specific lexical candidate to least-specific candidate
-- Uses `const_get` and `const_source_location` to resolve literal constant references to backing source files
-- Negative-caches misses to avoid repeated failed lookups during graph traversal
+- `build` traverses reachable files and stores a direct dependency graph
+- `dependencies` returns direct dependencies for a file
+- `transitive_dependencies` computes and caches the transitive closure lazily
+- Constant resolution results are cached and reused across `build` calls
+- Resolves each reference from most-specific lexical candidate to least-specific
+- Uses `const_defined?` and `const_source_location` to resolve literal constant references to source files
 
-This is intended for a booted application process. It will execute autoloads while resolving constants, and it will not see dynamic constant lookups that are not expressed as literal constants in the source.
-
-This is the higher-fanout output shape: if your caller really wants a direct graph instead of full closures, that would need a separate API.
+This is intended for a booted application process. It requires constants to be eager-loaded. It will not see dynamic constant lookups that are not expressed as literal constants in the source.
 
 ## Writing custom trackers
 
