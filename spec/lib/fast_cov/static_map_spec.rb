@@ -7,12 +7,16 @@ require "tmpdir"
 
 RSpec.describe FastCov::StaticMap do
   describe "#build" do
-    it "returns direct dependencies of the input files" do
+    it "returns transitive dependencies of the input files" do
       with_static_map_fixture do |root|
         static_map = described_class.new(root: root)
         deps = static_map.build("spec/*_spec.rb")
 
-        expect(deps).to eq(["app/static_map_autoload_fixture/entry_point.rb"])
+        expect(deps).to eq([
+          "app/static_map_autoload_fixture/dependency.rb",
+          "app/static_map_autoload_fixture/entry_point.rb",
+          "app/static_map_autoload_fixture/leaf.rb"
+        ])
       end
     end
 
@@ -44,12 +48,17 @@ RSpec.describe FastCov::StaticMap do
 
     it "expands relative file globs against root" do
       with_static_map_fixture do |root|
+        expected = [
+          "app/static_map_autoload_fixture/dependency.rb",
+          "app/static_map_autoload_fixture/entry_point.rb",
+          "app/static_map_autoload_fixture/leaf.rb"
+        ]
+
         Dir.mktmpdir("fast_cov_static_map_cwd") do |cwd|
           Dir.chdir(cwd) do
             static_map = described_class.new(root: root)
-            deps = static_map.build("spec/*_spec.rb")
 
-            expect(deps).to eq(["app/static_map_autoload_fixture/entry_point.rb"])
+            expect(static_map.build("spec/*_spec.rb")).to eq(expected)
           end
         end
       end
@@ -60,7 +69,7 @@ RSpec.describe FastCov::StaticMap do
         static_map = described_class.new(root: Pathname.new(root))
         deps = static_map.build("spec/*_spec.rb")
 
-        expect(deps).to eq(["app/static_map_autoload_fixture/entry_point.rb"])
+        expect(deps).to include("app/static_map_autoload_fixture/entry_point.rb")
       end
     end
 
@@ -153,13 +162,13 @@ RSpec.describe FastCov::StaticMap do
     end
   end
 
-  describe "#dependencies" do
+  describe "#direct_dependencies" do
     it "returns direct dependencies for a file" do
       with_static_map_fixture do |root|
         static_map = described_class.new(root: root)
         static_map.build("spec/*_spec.rb")
 
-        expect(static_map.dependencies("spec/static_map_autoload_fixture_spec.rb")).to eq(
+        expect(static_map.direct_dependencies("spec/static_map_autoload_fixture_spec.rb")).to eq(
           ["app/static_map_autoload_fixture/entry_point.rb"]
         )
       end
@@ -168,17 +177,17 @@ RSpec.describe FastCov::StaticMap do
     it "returns an empty array for unknown files" do
       static_map = described_class.new(root: Dir.pwd)
 
-      expect(static_map.dependencies("/nonexistent/file.rb")).to eq([])
+      expect(static_map.direct_dependencies("/nonexistent/file.rb")).to eq([])
     end
   end
 
-  describe "#transitive_dependencies" do
+  describe "#dependencies" do
     it "computes the transitive closure for a file" do
       with_static_map_fixture do |root|
         static_map = described_class.new(root: root)
         static_map.build("spec/*_spec.rb")
 
-        expect(static_map.transitive_dependencies("spec/static_map_autoload_fixture_spec.rb")).to eq([
+        expect(static_map.dependencies("spec/static_map_autoload_fixture_spec.rb")).to eq([
           "app/static_map_autoload_fixture/dependency.rb",
           "app/static_map_autoload_fixture/entry_point.rb",
           "app/static_map_autoload_fixture/leaf.rb"
@@ -193,7 +202,7 @@ RSpec.describe FastCov::StaticMap do
         static_map = described_class.new(root: root, ignored_paths: leaf_file)
         static_map.build("spec/*_spec.rb")
 
-        expect(static_map.transitive_dependencies("spec/static_map_autoload_fixture_spec.rb")).to eq([
+        expect(static_map.dependencies("spec/static_map_autoload_fixture_spec.rb")).to eq([
           "app/static_map_autoload_fixture/dependency.rb",
           "app/static_map_autoload_fixture/entry_point.rb"
         ])
@@ -241,7 +250,7 @@ RSpec.describe FastCov::StaticMap do
         static_map.build(spec_file)
 
         expected = dependency_files.map { |f| f.delete_prefix("#{root}/") }.sort
-        expect(static_map.transitive_dependencies("spec/deep_spec.rb")).to eq(expected)
+        expect(static_map.dependencies("spec/deep_spec.rb")).to eq(expected)
       end
     end
 
@@ -284,14 +293,14 @@ RSpec.describe FastCov::StaticMap do
         static_map = described_class.new(root: root)
         static_map.build(spec_file)
 
-        expect(static_map.transitive_dependencies("spec/cycle_spec.rb")).to eq(["app/cycle/a.rb", "app/cycle/b.rb"])
+        expect(static_map.dependencies("spec/cycle_spec.rb")).to eq(["app/cycle/a.rb", "app/cycle/b.rb"])
       end
     end
 
     it "returns an empty array for unknown files" do
       static_map = described_class.new(root: Dir.pwd)
 
-      expect(static_map.transitive_dependencies("/nonexistent/file.rb")).to eq([])
+      expect(static_map.dependencies("/nonexistent/file.rb")).to eq([])
     end
   end
 

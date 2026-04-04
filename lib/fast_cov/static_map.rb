@@ -47,11 +47,11 @@ module FastCov
       @graph
     end
 
-    def dependencies(file)
+    def direct_dependencies(file)
       @graph.fetch(relativize_input(file), EMPTY_ARRAY)
     end
 
-    def transitive_dependencies(file)
+    def dependencies(file)
       file = relativize_input(file)
       resolve_transitive_dependencies(file)
     end
