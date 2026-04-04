@@ -8,6 +8,7 @@ module FastCov
 
     def initialize(root:, ignored_paths: [])
       @root = share_path(root)
+      @root_prefix = -"#{@root}/"
       @ignored_paths = normalize_ignored_paths(ignored_paths)
       @resolved_file_by_const = {}
       @direct_dependencies_by_file = {}
@@ -27,7 +28,8 @@ module FastCov
 
         processed[file] = true
         dependencies = direct_dependencies_for_file(file)
-        @graph[file] = dependencies
+        relative_file = relativize(file)
+        @graph[relative_file] = dependencies.empty? ? EMPTY_ARRAY : dependencies.map { |d| relativize(d) }.freeze
 
         dependencies.each do |dependency|
           next if processed[dependency]
@@ -45,11 +47,11 @@ module FastCov
     end
 
     def dependencies(file)
-      @graph.fetch(share_path(file), EMPTY_ARRAY)
+      @graph.fetch(relativize_input(file), EMPTY_ARRAY)
     end
 
     def transitive_dependencies(file)
-      file = share_path(file)
+      file = relativize_input(file)
       resolve_transitive_dependencies(file)
     end
 
@@ -176,13 +178,9 @@ module FastCov
     def expand_files(patterns)
       Array(patterns)
         .flat_map do |pattern|
-          expanded_pattern = if pattern.to_s.start_with?("/")
-            pattern.to_s
-          else
-            File.expand_path(pattern.to_s, root)
-          end
-
-          Dir.glob(expanded_pattern)
+          pattern = pattern.to_s
+          pattern = File.expand_path(pattern, root) unless File.absolute_path?(pattern)
+          Dir.glob(pattern)
         end
         .map { |path| share_path(path) }
         .uniq
@@ -196,6 +194,19 @@ module FastCov
         .uniq
         .sort
         .freeze
+    end
+
+    def relativize(absolute_path)
+      share_string(absolute_path.delete_prefix(@root_prefix))
+    end
+
+    def relativize_input(file)
+      path = file.to_s
+      if File.absolute_path?(path)
+        relativize(path)
+      else
+        share_string(path)
+      end
     end
 
     def share_path(path)
