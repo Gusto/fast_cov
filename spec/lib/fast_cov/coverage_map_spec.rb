@@ -23,11 +23,11 @@ RSpec.describe FastCov::CoverageMap do
       coverage.stop
     end
 
-    it "returns a Set from block form" do
+    it "returns a Set from build block form" do
       coverage = described_class.new
       coverage.root = fixtures_path("calculator/operations")
 
-      result = coverage.start do
+      result = coverage.build do
         calculator.add(1, 2)
         calculator.subtract(3, 1)
       end
@@ -61,12 +61,12 @@ RSpec.describe FastCov::CoverageMap do
       expect(second_result).not_to include("add.rb")
     end
 
-    it "raises when block form is used while already started" do
+    it "raises when build is used while already started" do
       coverage = described_class.new
       coverage.root = fixtures_path("calculator")
       coverage.start
 
-      expect { coverage.start {} }.to raise_error(RuntimeError, "CoverageMap is already started")
+      expect { coverage.build {} }.to raise_error(RuntimeError, "CoverageMap is already started")
     ensure
       coverage.stop
     end
@@ -78,7 +78,7 @@ RSpec.describe FastCov::CoverageMap do
       coverage.root = fixtures_path("calculator")
       coverage.use(FastCov::FileTracker)
 
-      result = coverage.start do
+      result = coverage.build do
         File.read(fixtures_path("calculator", "config.yml"))
       end
 
@@ -158,7 +158,7 @@ RSpec.describe FastCov::CoverageMap do
       coverage.ignored_paths << "operations"
       coverage.ignored_paths << fixtures_path("calculator/helpers")
 
-      result = coverage.start do
+      result = coverage.build do
         calculator.add(1, 2)
       end
 

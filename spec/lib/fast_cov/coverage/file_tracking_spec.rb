@@ -92,7 +92,7 @@ RSpec.describe "FastCov file tracking" do
     end
 
     it "works with block form" do
-      coverage = coverage_map.start do
+      coverage = coverage_map.build do
         File.read(fixtures_path("calculator", "config.yml"))
       end
 

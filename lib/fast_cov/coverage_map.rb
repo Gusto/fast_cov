@@ -52,11 +52,21 @@ module FastCov
       self
     end
 
-    def start
-      if @started
-        raise "CoverageMap is already started" if block_given?
-        return self
+    def build
+      raise ArgumentError, "build requires a block" unless block_given?
+      raise "CoverageMap is already started" if @started
+
+      start
+      begin
+        yield
+      ensure
+        result = stop
       end
+      result
+    end
+
+    def start
+      return self if @started
 
       begin
         @native_coverage = Coverage.new(
@@ -72,17 +82,7 @@ module FastCov
         raise
       end
 
-      if block_given?
-        result = nil
-        begin
-          yield
-        ensure
-          result = stop
-        end
-        result
-      else
-        self
-      end
+      self
     end
 
     def stop
