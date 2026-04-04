@@ -66,30 +66,20 @@ RSpec.describe FastCov::StaticMap do
       end
     end
 
-    it "caches missing constants via prefix-level negative caching" do
+    it "handles missing constants gracefully" do
       Dir.mktmpdir("fast_cov_static_map") do |root|
-        entrypoint_a = File.join(root, "spec/one_spec.rb")
-        entrypoint_b = File.join(root, "spec/two_spec.rb")
+        spec_file = File.join(root, "spec/missing_spec.rb")
 
-        write_file(entrypoint_a, <<~RUBY)
+        write_file(spec_file, <<~RUBY)
           MissingStaticMapFixture::Dependency
         RUBY
-        write_file(entrypoint_b, <<~RUBY)
-          MissingStaticMapFixture::AnotherDependency
-        RUBY
-
-        allow(Object).to receive(:const_defined?).and_call_original
 
         map = described_class.build(
-          files: File.join(root, "spec/*_spec.rb"),
+          files: spec_file,
           root: root
         )
 
-        expect(map.dependencies(entrypoint_a)).to eq([])
-        expect(map.dependencies(entrypoint_b)).to eq([])
-
-        # MissingStaticMapFixture is checked once, then the prefix cache kicks in
-        expect(Object).to have_received(:const_defined?).with("MissingStaticMapFixture", false).once
+        expect(map.dependencies(spec_file)).to eq([])
       end
     end
 

@@ -15,9 +15,7 @@ module FastCov
     def initialize(root:, ignored_paths: [])
       @root = share_path(root)
       @ignored_paths = normalize_ignored_paths(ignored_paths)
-      @parsed_refs_by_file = {}
       @resolved_file_by_const = {}
-      @missed_consts = {}
       @direct_dependencies_by_file = {}
       @closure_by_file = {}
       @graph = {}
@@ -64,7 +62,7 @@ module FastCov
     private
 
     attr_reader :closure_by_file, :direct_dependencies_by_file, :ignored_paths,
-                :missed_consts, :parsed_refs_by_file, :resolved_file_by_const, :root
+                :resolved_file_by_const, :root
 
     def resolve_transitive_dependencies(file)
       cached = closure_by_file[file]
@@ -125,41 +123,22 @@ module FastCov
 
       cached = resolved_file_by_const[shared_const_name]
       return cached if cached
-      return nil if missed_consts.key?(shared_const_name)
-      return cache_miss(shared_const_name) unless constant_defined?(shared_const_name)
+      return nil unless constant_defined?(shared_const_name)
 
       source_location = Object.const_source_location(shared_const_name)
       file = source_location&.first
-      return cache_miss(shared_const_name) unless file && File.file?(file)
+      return nil unless file && File.file?(file)
 
       resolved_file_by_const[shared_const_name] = share_path(file)
     rescue StandardError
-      cache_miss(shared_const_name)
-    end
-
-    def cache_miss(const_name)
-      missed_consts[const_name] = true
       nil
     end
 
     def constant_defined?(const_name)
       current = Object
-      prefix = +""
 
-      const_name.split("::").each_with_index do |segment, index|
-        prefix << "::" unless index.zero?
-        prefix << segment
-
-        if missed_consts.key?(prefix)
-          cache_miss(const_name) unless prefix == const_name
-          return false
-        end
-
-        unless current.const_defined?(segment, false)
-          cache_miss(-(prefix.dup))
-          cache_miss(const_name) unless prefix == const_name
-          return false
-        end
+      const_name.split("::").each do |segment|
+        return false unless current.const_defined?(segment, false)
 
         current = current.const_get(segment, false)
       end
@@ -170,7 +149,7 @@ module FastCov
     end
 
     def reference_groups_for(file)
-      parsed_refs_by_file[file] ||= ReferenceExtractor.extract(file)
+      ReferenceExtractor.extract(file)
     end
 
     def direct_dependencies_for_file(file)
