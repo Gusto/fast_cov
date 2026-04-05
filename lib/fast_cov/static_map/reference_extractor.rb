@@ -8,7 +8,7 @@ module FastCov
       class << self
         def extract(filename)
           result = Prism.parse_file(filename)
-          raise ArgumentError, "failed to parse #{filename}" unless result.success?
+          return FastCov::StaticMap::EMPTY_ARRAY unless result.success?
 
           reference_groups = []
           seen_groups = {}

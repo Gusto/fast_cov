@@ -42,7 +42,10 @@ module FastCov
           @graph[relative_file] = deps.empty? ? EMPTY_ARRAY : deps.map { |d| relativize(d) }.freeze
 
           deps.each do |dep|
-            queue << dep unless processed[dep]
+            next if processed[dep]
+            next unless processable_file?(dep)
+
+            queue << dep
           end
         end
       end
@@ -113,17 +116,23 @@ module FastCov
       deps = {}
 
       groups.each do |candidates|
-        resolved_file = candidates.each do |const_name|
-          f = resolved_file_by_const[const_name]
-          break f if f && include_path?(f)
-        end
-        next unless resolved_file.is_a?(String)
+        resolved_file = resolve_reference_group(candidates)
+        next unless resolved_file
         next if resolved_file == file
 
         deps[resolved_file] = true
       end
 
       deps.empty? ? EMPTY_ARRAY : deps.keys.sort.freeze
+    end
+
+    def resolve_reference_group(candidates)
+      candidates.each do |const_name|
+        file = resolved_file_by_const[const_name]
+        return file if file && include_path?(file)
+      end
+
+      nil
     end
 
     def resolve_transitive_dependencies(file)

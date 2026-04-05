@@ -104,36 +104,17 @@ RSpec.describe FastCov::StaticMap do
         spec_file = File.join(root, "spec/cycle_spec.rb")
         file_a = File.join(root, "app/cycle/a.rb")
         file_b = File.join(root, "app/cycle/b.rb")
-        synthetic_files = [spec_file, file_a, file_b].to_set
 
-        write_file(spec_file, "# synthetic\n")
+        write_file(spec_file, "CycleConstA\n")
+        write_file(file_a, "CycleConstB\n")
+        write_file(file_b, "CycleConstA\n")
 
-        allow(File).to receive(:file?).and_wrap_original do |original, path|
-          synthetic_files.include?(path) || original.call(path)
-        end
+        stub_const("CycleConstA", Module.new)
+        stub_const("CycleConstB", Module.new)
 
-        allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract) do |path|
-          case path
-          when spec_file
-            [["CycleConstA"]]
-          when file_a
-            [["CycleConstB"]]
-          when file_b
-            [["CycleConstA"]]
-          else
-            raise "unexpected file: #{path}"
-          end
-        end
-
-        allow_any_instance_of(described_class).to receive(:constant_defined?).and_return(true)
-        allow(Object).to receive(:const_source_location) do |const_name|
-          case const_name
-          when "CycleConstA"
-            [file_a, 1]
-          when "CycleConstB"
-            [file_b, 1]
-          end
-        end
+        allow(Object).to receive(:const_source_location).and_call_original
+        allow(Object).to receive(:const_source_location).with("CycleConstA").and_return([file_a, 1])
+        allow(Object).to receive(:const_source_location).with("CycleConstB").and_return([file_b, 1])
 
         static_map = described_class.new(root: root)
         static_map.build(spec_file)
@@ -238,12 +219,16 @@ RSpec.describe FastCov::StaticMap do
           ["DeepConst#{index}", [dependency_file, 1]]
         end
 
+        dependency_files.each_with_index do |_, index|
+          stub_const("DeepConst#{index}", Module.new)
+        end
+
         allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract) do |path|
           extracts.fetch(path)
         end
-        allow_any_instance_of(described_class).to receive(:constant_defined?).and_return(true)
-        allow(Object).to receive(:const_source_location) do |const_name|
-          locations[const_name]
+        allow(Object).to receive(:const_source_location).and_call_original
+        locations.each do |const_name, location|
+          allow(Object).to receive(:const_source_location).with(const_name).and_return(location)
         end
 
         static_map = described_class.new(root: root)
@@ -259,36 +244,17 @@ RSpec.describe FastCov::StaticMap do
         spec_file = File.join(root, "spec/cycle_spec.rb")
         file_a = File.join(root, "app/cycle/a.rb")
         file_b = File.join(root, "app/cycle/b.rb")
-        synthetic_files = [spec_file, file_a, file_b].to_set
 
-        write_file(spec_file, "# synthetic\n")
+        write_file(spec_file, "CycleConstA\n")
+        write_file(file_a, "CycleConstB\n")
+        write_file(file_b, "CycleConstA\n")
 
-        allow(File).to receive(:file?).and_wrap_original do |original, path|
-          synthetic_files.include?(path) || original.call(path)
-        end
+        stub_const("CycleConstA", Module.new)
+        stub_const("CycleConstB", Module.new)
 
-        allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract) do |path|
-          case path
-          when spec_file
-            [["CycleConstA"]]
-          when file_a
-            [["CycleConstB"]]
-          when file_b
-            [["CycleConstA"]]
-          else
-            raise "unexpected file: #{path}"
-          end
-        end
-
-        allow_any_instance_of(described_class).to receive(:constant_defined?).and_return(true)
-        allow(Object).to receive(:const_source_location) do |const_name|
-          case const_name
-          when "CycleConstA"
-            [file_a, 1]
-          when "CycleConstB"
-            [file_b, 1]
-          end
-        end
+        allow(Object).to receive(:const_source_location).and_call_original
+        allow(Object).to receive(:const_source_location).with("CycleConstA").and_return([file_a, 1])
+        allow(Object).to receive(:const_source_location).with("CycleConstB").and_return([file_b, 1])
 
         static_map = described_class.new(root: root)
         static_map.build(spec_file)
