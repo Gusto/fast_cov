@@ -6,38 +6,26 @@ module FastCov
 
     autoload :ReferenceExtractor, "fast_cov/static_map/reference_extractor"
 
-    def initialize(root:, ignored_paths: [])
+    def initialize(root:, ignored_paths: [], concurrency: Etc.nprocessors)
       @root = share_path(root)
       @root_prefix = -"#{@root}/"
       @ignored_paths = normalize_ignored_paths(ignored_paths)
+      @concurrency = concurrency
       @resolved_file_by_const = {}
+      @resolve_mutex = Mutex.new
       @direct_dependencies_by_file = {}
+      @deps_mutex = Mutex.new
       @closure_by_file = {}
       @graph = {}
     end
 
     def build(*patterns)
       input_files = expand_files(patterns.flatten).select { |file| processable_file?(file) }
-      queue = input_files.dup
-      processed = {}
-      index = 0
 
-      while index < queue.length
-        file = queue[index]
-        index += 1
-        next if processed[file]
-
-        processed[file] = true
-        dependencies = direct_dependencies_for_file(file)
-        relative_file = relativize(file)
-        @graph[relative_file] = dependencies.empty? ? EMPTY_ARRAY : dependencies.map { |d| relativize(d) }.freeze
-
-        dependencies.each do |dependency|
-          next if processed[dependency]
-          next unless processable_file?(dependency)
-
-          queue << dependency
-        end
+      if @concurrency > 1
+        build_parallel(input_files)
+      else
+        build_sequential(input_files)
       end
 
       input_files.flat_map { |file| dependencies(file) }.uniq
@@ -61,12 +49,96 @@ module FastCov
     attr_reader :closure_by_file, :direct_dependencies_by_file, :ignored_paths,
                 :resolved_file_by_const, :root
 
+    def build_sequential(input_files)
+      queue = input_files.dup
+      processed = {}
+      index = 0
+
+      while index < queue.length
+        file = queue[index]
+        index += 1
+        next if processed[file]
+
+        processed[file] = true
+        deps = direct_dependencies_for_file(file)
+        store_graph_entry(file, deps)
+
+        deps.each do |dep|
+          next if processed[dep]
+          next unless processable_file?(dep)
+
+          queue << dep
+        end
+      end
+    end
+
+    def build_parallel(input_files)
+      queue = Queue.new
+      processed = {}
+      processed_mutex = Mutex.new
+      discovered = Queue.new
+
+      input_files.each { |f| queue << f }
+
+      loop do
+        break if queue.empty?
+
+        # Drain queue into a batch for this round
+        batch = []
+        batch << queue.pop until queue.empty?
+
+        # Filter already-processed files
+        batch.reject! do |file|
+          processed_mutex.synchronize { processed[file] }
+        end
+        next if batch.empty?
+
+        # Process batch in parallel
+        results = batch.each_slice(([batch.size / @concurrency, 1].max)).map do |slice|
+          Thread.new(slice) do |files|
+            thread_results = []
+            files.each do |file|
+              skip = processed_mutex.synchronize do
+                if processed[file]
+                  true
+                else
+                  processed[file] = true
+                  false
+                end
+              end
+              next if skip
+
+              deps = direct_dependencies_for_file(file)
+              thread_results << [file, deps]
+            end
+            thread_results
+          end
+        end.flat_map(&:value)
+
+        # Store results and discover new files (sequential — fast)
+        results.each do |file, deps|
+          store_graph_entry(file, deps)
+
+          deps.each do |dep|
+            next if processed_mutex.synchronize { processed[dep] }
+            next unless processable_file?(dep)
+
+            queue << dep
+          end
+        end
+      end
+    end
+
+    def store_graph_entry(file, deps)
+      relative_file = relativize(file)
+      @graph[relative_file] = deps.empty? ? EMPTY_ARRAY : deps.map { |d| relativize(d) }.freeze
+    end
+
     def resolve_transitive_dependencies(file)
       cached = closure_by_file[file]
       return cached if cached
 
       visiting = {}
-      local_deps = {}
       stack = [[file, :enter]]
 
       until stack.empty?
@@ -126,7 +198,9 @@ module FastCov
       file = source_location&.first
       return nil unless file && File.file?(file)
 
-      resolved_file_by_const[shared_const_name] = share_path(file)
+      resolved = share_path(file)
+      @resolve_mutex.synchronize { resolved_file_by_const[shared_const_name] = resolved }
+      resolved
     rescue StandardError
       nil
     end
@@ -150,7 +224,8 @@ module FastCov
     end
 
     def direct_dependencies_for_file(file)
-      return direct_dependencies_by_file[file] if direct_dependencies_by_file.key?(file)
+      cached = @deps_mutex.synchronize { direct_dependencies_by_file[file] }
+      return cached if cached
 
       dependencies = {}
 
@@ -163,7 +238,9 @@ module FastCov
       end
 
       dependencies.delete(file)
-      direct_dependencies_by_file[file] = dependencies.empty? ? EMPTY_ARRAY : dependencies.keys.sort.freeze
+      result = dependencies.empty? ? EMPTY_ARRAY : dependencies.keys.sort.freeze
+      @deps_mutex.synchronize { direct_dependencies_by_file[file] = result }
+      result
     end
 
     def include_path?(path)

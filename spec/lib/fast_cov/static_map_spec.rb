@@ -344,6 +344,12 @@ RSpec.describe FastCov::StaticMap do
       StaticMapAutoloadFixture.autoload(:Dependency, File.join(root, "app/static_map_autoload_fixture/dependency.rb"))
       StaticMapAutoloadFixture.autoload(:Leaf, File.join(root, "app/static_map_autoload_fixture/leaf.rb"))
 
+      # Eager-load to simulate a booted application — const_source_location
+      # only returns the real file path after the constant is loaded.
+      StaticMapAutoloadFixture::Leaf
+      StaticMapAutoloadFixture::Dependency
+      StaticMapAutoloadFixture::EntryPoint
+
       yield(root)
     end
   end
