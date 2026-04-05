@@ -42,10 +42,7 @@ module FastCov
           @graph[relative_file] = deps.empty? ? EMPTY_ARRAY : deps.map { |d| relativize(d) }.freeze
 
           deps.each do |dep|
-            next if processed[dep]
-            next unless processable_file?(dep)
-
-            queue << dep
+            queue << dep unless processed[dep]
           end
         end
       end
