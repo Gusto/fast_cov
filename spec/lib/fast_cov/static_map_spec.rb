@@ -5,6 +5,12 @@ require "pathname"
 require "set"
 require "tmpdir"
 
+# Load cycle fixtures eagerly so const_source_location resolves to real files
+module CycleFixture; end
+require_relative "../../fixtures/cycle/alpha"
+require_relative "../../fixtures/cycle/beta"
+require_relative "../../fixtures/cycle/entry"
+
 RSpec.describe FastCov::StaticMap do
   describe "#build" do
     it "returns transitive dependencies of the input files" do
@@ -34,15 +40,16 @@ RSpec.describe FastCov::StaticMap do
       end
     end
 
-    it "does not reuse parsed references across build instances" do
+    it "does not reuse caches across instances" do
       with_static_map_fixture do |root|
-        described_class.new(root: root).build("spec/*_spec.rb")
+        static_map_a = described_class.new(root: root)
+        static_map_a.build("spec/*_spec.rb")
 
-        allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract).and_call_original
+        static_map_b = described_class.new(root: root)
+        static_map_b.build("spec/*_spec.rb")
 
-        described_class.new(root: root).build("spec/*_spec.rb")
-
-        expect(FastCov::StaticMap::ReferenceExtractor).to have_received(:extract).at_least(:once)
+        expect(static_map_a.direct_graph).to eq(static_map_b.direct_graph)
+        expect(static_map_a.direct_graph).not_to equal(static_map_b.direct_graph)
       end
     end
 
@@ -100,31 +107,16 @@ RSpec.describe FastCov::StaticMap do
     end
 
     it "traverses discovered dependencies only once even with cycles" do
-      Dir.mktmpdir("fast_cov_static_map") do |root|
-        spec_file = File.join(root, "spec/cycle_spec.rb")
-        file_a = File.join(root, "app/cycle/a.rb")
-        file_b = File.join(root, "app/cycle/b.rb")
+      root = fixtures_path("cycle")
 
-        write_file(spec_file, "CycleConstA\n")
-        write_file(file_a, "CycleConstB\n")
-        write_file(file_b, "CycleConstA\n")
+      static_map = described_class.new(root: root)
+      static_map.build("entry.rb")
 
-        stub_const("CycleConstA", Module.new)
-        stub_const("CycleConstB", Module.new)
-
-        allow(Object).to receive(:const_source_location).and_call_original
-        allow(Object).to receive(:const_source_location).with("CycleConstA").and_return([file_a, 1])
-        allow(Object).to receive(:const_source_location).with("CycleConstB").and_return([file_b, 1])
-
-        static_map = described_class.new(root: root)
-        static_map.build(spec_file)
-
-        expect(static_map.direct_graph).to eq(
-          "spec/cycle_spec.rb" => ["app/cycle/a.rb"],
-          "app/cycle/a.rb" => ["app/cycle/b.rb"],
-          "app/cycle/b.rb" => ["app/cycle/a.rb"]
-        )
-      end
+      expect(static_map.direct_graph).to eq(
+        "entry.rb" => ["alpha.rb"],
+        "alpha.rb" => ["beta.rb"],
+        "beta.rb" => ["alpha.rb"]
+      )
     end
 
     it "respects ignored paths while traversing the graph" do
@@ -139,6 +131,23 @@ RSpec.describe FastCov::StaticMap do
           "app/static_map_autoload_fixture/entry_point.rb" => ["app/static_map_autoload_fixture/dependency.rb"],
           "app/static_map_autoload_fixture/dependency.rb" => []
         )
+      end
+    end
+
+    it "skips files with syntax errors without crashing" do
+      Dir.mktmpdir("fast_cov_static_map") do |root|
+        good_file = File.join(root, "spec/good_spec.rb")
+        bad_file = File.join(root, "spec/bad_spec.rb")
+
+        write_file(good_file, "String\n")
+        write_file(bad_file, "def foo(\n")
+
+        static_map = described_class.new(root: root)
+        deps = static_map.build(good_file, bad_file)
+
+        expect(static_map.direct_graph).to have_key("spec/good_spec.rb")
+        expect(static_map.direct_graph).to have_key("spec/bad_spec.rb")
+        expect(static_map.direct_graph["spec/bad_spec.rb"]).to eq([])
       end
     end
   end
@@ -190,6 +199,15 @@ RSpec.describe FastCov::StaticMap do
       end
     end
 
+    it "handles cycles in transitive dependencies" do
+      root = fixtures_path("cycle")
+
+      static_map = described_class.new(root: root)
+      static_map.build("entry.rb")
+
+      expect(static_map.dependencies("entry.rb")).to eq(["alpha.rb", "beta.rb"])
+    end
+
     it "handles deep dependency chains without recursive stack growth" do
       Dir.mktmpdir("fast_cov_static_map") do |root|
         spec_file = File.join(root, "spec/deep_spec.rb")
@@ -215,10 +233,6 @@ RSpec.describe FastCov::StaticMap do
             end
         end
 
-        locations = dependency_files.each_with_index.to_h do |dependency_file, index|
-          ["DeepConst#{index}", [dependency_file, 1]]
-        end
-
         dependency_files.each_with_index do |_, index|
           stub_const("DeepConst#{index}", Module.new)
         end
@@ -227,8 +241,8 @@ RSpec.describe FastCov::StaticMap do
           extracts.fetch(path)
         end
         allow(Object).to receive(:const_source_location).and_call_original
-        locations.each do |const_name, location|
-          allow(Object).to receive(:const_source_location).with(const_name).and_return(location)
+        dependency_files.each_with_index do |dependency_file, index|
+          allow(Object).to receive(:const_source_location).with("DeepConst#{index}").and_return([dependency_file, 1])
         end
 
         static_map = described_class.new(root: root)
@@ -236,30 +250,6 @@ RSpec.describe FastCov::StaticMap do
 
         expected = dependency_files.map { |f| f.delete_prefix("#{root}/") }.sort
         expect(static_map.dependencies("spec/deep_spec.rb")).to eq(expected)
-      end
-    end
-
-    it "handles cycles in transitive dependencies" do
-      Dir.mktmpdir("fast_cov_static_map") do |root|
-        spec_file = File.join(root, "spec/cycle_spec.rb")
-        file_a = File.join(root, "app/cycle/a.rb")
-        file_b = File.join(root, "app/cycle/b.rb")
-
-        write_file(spec_file, "CycleConstA\n")
-        write_file(file_a, "CycleConstB\n")
-        write_file(file_b, "CycleConstA\n")
-
-        stub_const("CycleConstA", Module.new)
-        stub_const("CycleConstB", Module.new)
-
-        allow(Object).to receive(:const_source_location).and_call_original
-        allow(Object).to receive(:const_source_location).with("CycleConstA").and_return([file_a, 1])
-        allow(Object).to receive(:const_source_location).with("CycleConstB").and_return([file_b, 1])
-
-        static_map = described_class.new(root: root)
-        static_map.build(spec_file)
-
-        expect(static_map.dependencies("spec/cycle_spec.rb")).to eq(["app/cycle/a.rb", "app/cycle/b.rb"])
       end
     end
 

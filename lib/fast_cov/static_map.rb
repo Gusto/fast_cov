@@ -4,7 +4,7 @@ module FastCov
   class StaticMap
     EMPTY_ARRAY = [].freeze
 
-    autoload :ReferenceExtractor, "fast_cov/static_map/reference_extractor"
+    autoload :ReferenceExtractor, File.expand_path("static_map/reference_extractor", __dir__)
 
     def initialize(root:, ignored_paths: [], concurrency: Etc.nprocessors)
       @root = share_path(root)
