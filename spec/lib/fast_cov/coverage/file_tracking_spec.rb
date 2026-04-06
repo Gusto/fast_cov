@@ -41,6 +41,18 @@ RSpec.describe "FastCov file tracking" do
       expect(coverage).to include("config.yml")
     end
 
+    it "creates connected dependency for indirect reads like YAML.safe_load_file" do
+      coverage_map.start
+      ConfigReader.read_yaml_config
+      coverage_map.stop
+
+      connections = coverage_map.connected_dependencies
+        .instance_variable_get(:@connections)
+      source = fixtures_path("calculator", "operations", "config_reader.rb")
+
+      expect(connections[source]).to have_key(fixtures_path("calculator", "config.yml"))
+    end
+
     it "tracks files read by executed Ruby code" do
       coverage_map.start
       ConfigReader.read_config

@@ -15,7 +15,7 @@ RSpec.describe FastCov::FactoryBotTracker do
   end
 
   let(:coverage_map) do
-    instance_double(FastCov::CoverageMap, threads: true)
+    instance_double(FastCov::CoverageMap, threads: true, root: fixtures_path("factory_bot"))
   end
 
   subject(:tracker) { described_class.new(coverage_map) }
@@ -24,6 +24,7 @@ RSpec.describe FastCov::FactoryBotTracker do
     allow(coverage_map).to receive(:include_path?) do |path|
       path.start_with?(fixtures_path("factory_bot"))
     end
+    allow(coverage_map).to receive(:connect)
   end
 
   describe "#install" do
@@ -100,10 +101,11 @@ RSpec.describe FastCov::FactoryBotTracker do
     end
 
     context "with threads: false (single-thread tracking)" do
-      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false) }
+      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false, root: fixtures_path("factory_bot")) }
 
       before do
         allow(coverage_map).to receive(:include_path?).and_return(true)
+        allow(coverage_map).to receive(:connect)
       end
 
       it "only records factory usage from the starting thread" do

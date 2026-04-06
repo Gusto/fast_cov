@@ -16,9 +16,8 @@ module FastCov
 
     module FilePatch
       def read(name, *args, **kwargs, &block)
-        source = caller_locations(1, 1).first&.absolute_path
         super.tap do
-          FastCov::FileTracker.record(to: source) { File.expand_path(name) }
+          FastCov::FileTracker.record(File.expand_path(name))
         end
       end
 
@@ -26,9 +25,8 @@ module FastCov
         mode = args[0]
         is_read = mode.nil? || (mode.is_a?(String) && mode.start_with?("r")) ||
                   (mode.is_a?(Integer) && (mode & (File::WRONLY | File::RDWR)).zero?)
-        source = caller_locations(1, 1).first&.absolute_path
         super.tap do
-          FastCov::FileTracker.record(to: source) { File.expand_path(name) } if is_read
+          FastCov::FileTracker.record(File.expand_path(name)) if is_read
         end
       end
     end

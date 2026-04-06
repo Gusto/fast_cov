@@ -140,80 +140,6 @@ static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
   record_impacted_file(data, filename);
 }
 
-// ---- Utils module methods (FastCov::Utils) ------------------------------
-
-// Utils.path_within?(path, directory) -> true/false
-// Check if path is within directory, correctly handling:
-// - Trailing slashes on directory
-// - Sibling directories with longer names (e.g., /a/b/c vs /a/b/cd)
-static VALUE utils_path_within(VALUE self, VALUE path, VALUE directory) {
-  Check_Type(path, T_STRING);
-  Check_Type(directory, T_STRING);
-
-  // Freeze strings to prevent GC compaction from moving them
-  rb_str_freeze(path);
-  rb_str_freeze(directory);
-
-  bool result = fast_cov_is_within_root(
-      RSTRING_PTR(path), RSTRING_LEN(path),
-      RSTRING_PTR(directory), RSTRING_LEN(directory));
-
-  return result ? Qtrue : Qfalse;
-}
-
-// Utils.relativize_paths(set, root) -> set
-// Mutates set in place: converts absolute paths to relative paths from root.
-// Paths not within root are left unchanged.
-static VALUE utils_relativize_paths(VALUE self, VALUE set, VALUE root) {
-  Check_Type(root, T_STRING);
-
-  // Freeze root to prevent GC from moving it during compaction
-  rb_str_freeze(root);
-
-  const char *root_ptr = RSTRING_PTR(root);
-  long root_len = RSTRING_LEN(root);
-
-  // Normalize: strip trailing slash for offset calculation
-  long effective_root_len = root_len;
-  if (effective_root_len > 0 && root_ptr[effective_root_len - 1] == '/') {
-    effective_root_len--;
-  }
-
-  // Collect paths to transform (can't modify set while iterating)
-  VALUE paths = rb_funcall(set, rb_intern("to_a"), 0);
-  long num_paths = RARRAY_LEN(paths);
-
-  for (long i = 0; i < num_paths; i++) {
-    VALUE abs_path = rb_ary_entry(paths, i);
-    if (!RB_TYPE_P(abs_path, T_STRING)) continue;
-
-    // Freeze to prevent GC moving it
-    rb_str_freeze(abs_path);
-
-    const char *path_ptr = RSTRING_PTR(abs_path);
-    long path_len = RSTRING_LEN(abs_path);
-
-    // Use proper within_root check
-    if (!fast_cov_is_within_root(path_ptr, path_len, root_ptr, root_len)) {
-      continue;
-    }
-
-    // Calculate offset (skip root + separator)
-    long offset = effective_root_len;
-    if (offset < path_len && path_ptr[offset] == '/') offset++;
-
-    // Create relative path
-    VALUE rel_path = rb_str_substr(abs_path, offset, path_len - offset);
-
-    // Delete old path, add new path
-    rb_funcall(set, rb_intern("delete"), 1, abs_path);
-    rb_funcall(set, rb_intern("add"), 1, rel_path);
-  }
-
-  RB_GC_GUARD(paths);
-  return set;
-}
-
 // ---- Ruby instance methods ----------------------------------------------
 
 static VALUE fast_cov_initialize(int argc, VALUE *argv, VALUE self) {
@@ -366,8 +292,4 @@ void Init_fast_cov(void) {
   rb_define_method(cCoverage, "start", fast_cov_start, 0);
   rb_define_method(cCoverage, "stop", fast_cov_stop, 0);
 
-  // FastCov::Utils module (C-defined methods)
-  VALUE mUtils = rb_define_module_under(mFastCov, "Utils");
-  rb_define_module_function(mUtils, "path_within?", utils_path_within, 2);
-  rb_define_module_function(mUtils, "relativize_paths", utils_relativize_paths, 2);
 }
