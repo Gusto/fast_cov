@@ -121,6 +121,48 @@ cov = FastCov::Coverage.new(
 
 This API is mainly useful for internal use and low-level tests. `CoverageMap` is the intended public orchestration API.
 
+## StaticMap
+
+`FastCov::StaticMap` is a build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and builds a direct dependency graph. Transitive closures are computed lazily on demand.
+
+```ruby
+static_map = FastCov::StaticMap.new(root: Rails.root)
+static_map.build("spec/**/*_spec.rb")
+
+# Direct dependencies for a single file
+static_map.dependencies("/app/spec/models/user_spec.rb")
+# => ["/app/app/models/user.rb"]
+
+# Transitive closure (computed and cached on first call)
+static_map.transitive_dependencies("/app/spec/models/user_spec.rb")
+# => ["/app/app/models/account.rb", "/app/app/models/user.rb"]
+
+# Raw direct graph
+static_map.direct_graph
+# => { "/app/spec/models/user_spec.rb" => ["/app/app/models/user.rb"], ... }
+```
+
+The instance caches constant resolution results, so reusing the same instance across multiple `build` calls is efficient.
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `root` | String or Pathname | required | Absolute project root. Only resolved files under this path are included. |
+| `ignored_paths` | String or Array<String> | `[]` | Files or directories to exclude from the graph and recursive traversal. |
+| `*patterns` (on `build`) | String(s) or Array | required | File paths or globs to traverse. Relative paths are expanded against `root`. |
+
+#### How it works
+
+- `build` traverses reachable files and stores a direct dependency graph
+- `dependencies` returns direct dependencies for a file
+- `transitive_dependencies` computes and caches the transitive closure lazily
+- Constant resolution results are cached and reused across `build` calls
+- Resolves each reference from most-specific lexical candidate to least-specific
+- Uses `const_defined?` and `const_source_location` to resolve literal constant references to source files
+
+This is intended for a booted application process. It requires constants to be eager-loaded. It will not see dynamic constant lookups that are not expressed as literal constants in the source.
+
 ## Writing custom trackers
 
 There are two approaches: a minimal custom tracker, or inheriting from `AbstractTracker`.
@@ -167,7 +209,7 @@ class MyTracker < FastCov::AbstractTracker
 
   module MyPatch
     def some_method(...)
-      MyTracker.record(some_file_path)
+      MyTracker.record { some_file_path }
       super
     end
   end

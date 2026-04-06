@@ -14,11 +14,11 @@ RSpec.describe "FastCov connected dependencies" do
     end
 
     it "reuses learned file dependencies across runs" do
-      first_result = coverage_map.start do
+      first_result = coverage_map.build do
         ConfigReader.memoized_config
       end
 
-      second_result = coverage_map.start do
+      second_result = coverage_map.build do
         ConfigReader.memoized_config
       end
 
@@ -43,11 +43,11 @@ RSpec.describe "FastCov connected dependencies" do
     it "reuses learned const dependencies across runs" do
       resolver = ConstGetFixtures::Resolver.new
 
-      first_result = coverage_map.start do
+      first_result = coverage_map.build do
         resolver.resolve(:Service)
       end
 
-      second_result = coverage_map.start do
+      second_result = coverage_map.build do
         resolver.resolve(:Service)
       end
 
