@@ -21,6 +21,10 @@ module FastCov
       @started_thread = nil
     end
 
+    def root
+      @coverage_map.root
+    end
+
     # Public API - called by FastCov framework
 
     def start
@@ -70,12 +74,12 @@ module FastCov
     class << self
       attr_accessor :active
 
-      def record(to: nil)
+      def record(path, to: nil)
         return unless active
-        return unless block_given?
+        return unless path
 
-        path = yield
-        active.record(path, to: to) if path
+        to ||= Utils.resolve_caller(caller_locations(1, 20), active.root)
+        active.record(path, to: to)
       end
 
       def reset

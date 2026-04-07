@@ -16,7 +16,7 @@ RSpec.describe FastCov::ConstGetTracker do
   end
 
   let(:coverage_map) do
-    instance_double(FastCov::CoverageMap, threads: true)
+    instance_double(FastCov::CoverageMap, threads: true, root: fixtures_path("const_get"))
   end
 
   subject(:tracker) { described_class.new(coverage_map) }
@@ -137,7 +137,7 @@ RSpec.describe FastCov::ConstGetTracker do
     end
 
     context "with threads: false (single-thread tracking)" do
-      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false) }
+      let(:coverage_map) { instance_double(FastCov::CoverageMap, threads: false, root: fixtures_path("const_get")) }
 
       before do
         allow(coverage_map).to receive(:include_path?).and_return(true)

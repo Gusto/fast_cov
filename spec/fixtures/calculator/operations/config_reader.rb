@@ -9,6 +9,10 @@ class ConfigReader
     File.read(config_path)
   end
 
+  def self.read_yaml_config
+    YAML.safe_load_file(config_path)
+  end
+
   def self.memoized_config
     @memoized_config ||= read_config
   end

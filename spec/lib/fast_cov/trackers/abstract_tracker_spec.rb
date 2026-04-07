@@ -176,19 +176,23 @@ RSpec.describe FastCov::AbstractTracker do
   end
 
   describe ".record (class method)" do
-    it "delegates the yielded path to the active instance when active" do
+    before do
+      allow(coverage_map).to receive(:root).and_return("/app")
+    end
+
+    it "delegates the path to the active instance when active" do
       tracker.start
-      described_class.record { "/app/foo.rb" }
+      described_class.record("/app/foo.rb")
       expect(tracker.instance_variable_get(:@files)).to include("/app/foo.rb")
     end
 
     it "safely no-ops when no active instance" do
-      expect { described_class.record { "/app/foo.rb" } }.not_to raise_error
+      expect { described_class.record("/app/foo.rb") }.not_to raise_error
     end
 
-    it "passes `to` through to the active tracker" do
+    it "passes explicit to: through to the active tracker" do
       tracker.start
-      described_class.record(to: "/app/services/config_reader.rb") { "/app/config/settings.yml" }
+      described_class.record("/app/config/settings.yml", to: "/app/services/config_reader.rb")
 
       expect(coverage_map).to have_received(:connect).with(
         from: "/app/services/config_reader.rb",
@@ -196,21 +200,10 @@ RSpec.describe FastCov::AbstractTracker do
       )
     end
 
-    it "does not evaluate the block when no active instance exists" do
-      called = false
-
-      described_class.record do
-        called = true
-        "/app/foo.rb"
-      end
-
-      expect(called).to be false
-    end
-
-    it "ignores nil paths from the block" do
+    it "ignores nil paths" do
       tracker.start
 
-      expect { described_class.record { nil } }.not_to change {
+      expect { described_class.record(nil) }.not_to change {
         tracker.instance_variable_get(:@files)
       }
     end
