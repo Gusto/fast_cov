@@ -12,9 +12,7 @@ module FastCov
   # Register via: coverage_map.use(FastCov::FactoryBotTracker)
   class FactoryBotTracker < AbstractTracker
     def install
-      unless defined?(::FactoryBot)
-        raise LoadError, "FactoryBotTracker requires the factory_bot gem to be installed"
-      end
+      gem "factory_bot"
 
       return if ::FactoryBot.factories.singleton_class.ancestors.include?(RegistryPatch)
 

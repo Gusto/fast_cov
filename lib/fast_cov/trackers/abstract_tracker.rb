@@ -15,6 +15,8 @@ module FastCov
   # - threads: true  -> record from ALL threads (global tracking)
   # - threads: false -> only record from the thread that called start
   class AbstractTracker
+    attr_reader :coverage_map
+
     def initialize(coverage_map, **_options)
       @coverage_map = coverage_map
       @files = nil
@@ -22,7 +24,7 @@ module FastCov
     end
 
     def root
-      @coverage_map.root
+      coverage_map.root
     end
 
     # Public API - called by FastCov framework

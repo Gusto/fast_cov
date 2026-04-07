@@ -130,19 +130,4 @@ RSpec.describe FastCov::FactoryBotTracker do
     end
   end
 
-  describe "when FactoryBot is not defined" do
-    it "raises LoadError with helpful message" do
-      factory_bot = Object.send(:remove_const, :FactoryBot)
-
-      begin
-        tracker = described_class.new(coverage_map)
-        expect { tracker.install }.to raise_error(
-          LoadError,
-          /factory_bot gem/
-        )
-      ensure
-        Object.const_set(:FactoryBot, factory_bot)
-      end
-    end
-  end
 end
