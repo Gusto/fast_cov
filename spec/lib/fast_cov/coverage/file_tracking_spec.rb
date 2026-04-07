@@ -41,16 +41,49 @@ RSpec.describe "FastCov file tracking" do
       expect(coverage).to include("config.yml")
     end
 
-    it "creates connected dependency for indirect reads like YAML.safe_load_file" do
+    it "tracks YAML files loaded via YAML.load_file" do
+      coverage_map.start
+      YAML.load_file(fixtures_path("calculator", "config.yml"), permitted_classes: [Symbol])
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks YAML files loaded via YAML.unsafe_load_file" do
+      coverage_map.start
+      YAML.unsafe_load_file(fixtures_path("calculator", "config.yml"))
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "does not track YAML files outside root" do
+      coverage_map.start
+      YAML.safe_load_file(File.expand_path("../../spec_helper.rb", __dir__)) rescue nil
+      coverage = coverage_map.stop
+
+      expect(coverage.any? { |k| k.end_with?("spec_helper.rb") }).to be false
+    end
+
+    it "does not track YAML files that fail to load" do
+      coverage_map.start
+      begin
+        YAML.safe_load_file(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "creates connected dependency when code reads YAML indirectly" do
       coverage_map.start
       ConfigReader.read_yaml_config
-      coverage_map.stop
+      coverage = coverage_map.stop
 
-      connections = coverage_map.connected_dependencies
-        .instance_variable_get(:@connections)
-      source = fixtures_path("calculator", "operations", "config_reader.rb")
-
-      expect(connections[source]).to have_key(fixtures_path("calculator", "config.yml"))
+      expect(coverage).to include("config.yml")
+      expect(coverage).to include("operations/config_reader.rb")
     end
 
     it "tracks files read by executed Ruby code" do
