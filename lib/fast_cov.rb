@@ -13,4 +13,5 @@ module FastCov
   autoload :ConstGetTracker, File.expand_path("fast_cov/trackers/const_get_tracker", __dir__)
   autoload :FixtureKitTracker, File.expand_path("fast_cov/trackers/fixture_kit_tracker", __dir__)
   autoload :StaticMap, File.expand_path("fast_cov/static_map", __dir__)
+  autoload :TestMap, File.expand_path("fast_cov/test_map", __dir__)
 end
