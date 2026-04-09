@@ -132,15 +132,15 @@ module FastCov
 
             min_path = active.map(&:file_path).min
 
-            merged = []
+            merged = Set.new
             active.each do |reader|
               if reader.file_path == min_path
-                merged.concat(reader.dependencies)
+                merged.merge(reader.dependencies)
                 reader.advance
               end
             end
 
-            block.call(min_path, merged.uniq.sort)
+            block.call(min_path, merged.to_a.sort)
             unique_files += 1
           end
         end
