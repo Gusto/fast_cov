@@ -77,13 +77,9 @@ module FastCov
       fragment_paths = patterns.flatten.flat_map { |p| p.include?("*") ? Dir.glob(p).sort : p }
       return 0 if fragment_paths.empty?
 
-      if fragment_paths.size <= readers
-        kway_merge(fragment_paths.map { |f| Reader.new(f) }, &block)
-      else
-        Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
-          intermediates = create_intermediates(fragment_paths, readers, tmpdir)
-          kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
-        end
+      Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
+        intermediates = create_intermediates(fragment_paths, readers, tmpdir)
+        kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
       end
     end
 
