@@ -2,7 +2,7 @@
 
 require "benchmark"
 require "fileutils"
-require "open3"
+require "shellwords"
 require "tmpdir"
 require "zlib"
 
@@ -106,14 +106,8 @@ module FastCov
         elapsed = Benchmark.realtime do
           intermediates = batches.each_with_index.map do |batch, i|
             intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
-            statuses = Open3.pipeline(
-              ["gunzip", "--stdout", *batch],
-              ["sort", "--field-separator", "\t", "--key", "1,1"],
-              out: intermediate
-            )
-            unless statuses.all?(&:success?)
-              raise "Failed to create intermediate file: #{intermediate}"
-            end
+            escaped = batch.map { |f| Shellwords.escape(f) }.join(" ")
+            system("gunzip --stdout #{escaped} | sort --field-separator='\t' --key=1,1 > #{Shellwords.escape(intermediate)}", exception: true)
             intermediate
           end
         end
