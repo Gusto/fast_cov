@@ -80,7 +80,7 @@ module FastCov
       if fragment_paths.size <= max_readers
         kway_merge(fragment_paths.map { |f| Reader.new(f) }, &block)
       else
-        Dir.mktmpdir("fast_cov_intermediates") do |tmpdir|
+        Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
           intermediates = create_intermediates(fragment_paths, max_readers, tmpdir)
           kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
         end
