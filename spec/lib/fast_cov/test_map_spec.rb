@@ -204,27 +204,25 @@ RSpec.describe FastCov::TestMap do
   describe "intermediate batching" do
     it "creates intermediates when fragment count exceeds max_readers" do
       fragments = 5.times.map do |i|
-        write_fragment(tmpdir, "f#{i}.gz", { "file_#{i}.rb" => "spec/#{i}.rb" })
+        write_fragment(tmpdir, "f#{i}.gz", { "file_#{i}.rb" => "test/#{i}.rb" })
       end
 
-      intermediates_dir = File.join(tmpdir, "intermediates")
       results = {}
-      described_class.aggregate(*fragments, max_readers: 2, intermediates_dir: intermediates_dir) do |file, sp|
-        results[file] = sp
+      described_class.aggregate(*fragments, max_readers: 2) do |file, deps|
+        results[file] = deps
       end
 
       expect(results.size).to eq(5)
-      expect(Dir.exist?(intermediates_dir)).to be false
     end
 
     it "merges overlapping entries across intermediates" do
       fragments = 10.times.map do |i|
-        write_fragment(tmpdir, "f#{i}.gz", { "shared.rb" => "spec/#{i}.rb" })
+        write_fragment(tmpdir, "f#{i}.gz", { "shared.rb" => "test/#{i}.rb" })
       end
 
       results = {}
-      described_class.aggregate(*fragments, max_readers: 3, intermediates_dir: File.join(tmpdir, "intermediates")) do |file, sp|
-        results[file] = sp
+      described_class.aggregate(*fragments, max_readers: 3) do |file, deps|
+        results[file] = deps
       end
 
       expect(results["shared.rb"].size).to eq(10)

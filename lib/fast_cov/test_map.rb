@@ -2,6 +2,7 @@
 
 require "fileutils"
 require "shellwords"
+require "tmpdir"
 require "zlib"
 
 module FastCov
@@ -70,23 +71,18 @@ module FastCov
     # Accepts file paths or glob patterns.
     # Yields (source_file, dependencies) for each unique file.
     # Returns the number of unique files yielded.
-    def self.aggregate(*patterns, max_readers: DEFAULT_MAX_READERS, intermediates_dir: nil, &block)
+    def self.aggregate(*patterns, max_readers: DEFAULT_MAX_READERS, &block)
       raise ArgumentError, "aggregate requires a block" unless block
 
       fragment_paths = patterns.flatten.flat_map { |p| p.include?("*") ? Dir.glob(p).sort : p }
       return 0 if fragment_paths.empty?
 
-      intermediates_dir ||= "tmp/fast_cov_intermediates"
-
       if fragment_paths.size <= max_readers
         kway_merge(fragment_paths.map { |f| Reader.new(f) }, &block)
       else
-        intermediates = create_intermediates(fragment_paths, max_readers, intermediates_dir)
-        begin
+        Dir.mktmpdir("fast_cov_intermediates") do |tmpdir|
+          intermediates = create_intermediates(fragment_paths, max_readers, tmpdir)
           kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
-        ensure
-          intermediates.each { |f| File.delete(f) if File.exist?(f) }
-          Dir.rmdir(intermediates_dir) if Dir.exist?(intermediates_dir) && Dir.empty?(intermediates_dir)
         end
       end
     end
