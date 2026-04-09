@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "benchmark"
 require "fileutils"
 require "open3"
 require "tmpdir"
@@ -71,61 +72,82 @@ module FastCov
     # Accepts file paths or glob patterns.
     # Yields (source_file, dependencies) for each unique file.
     # Returns the number of unique files yielded.
-    def self.aggregate(*patterns, readers: DEFAULT_MAX_READERS, &block)
+    #
+    # Options:
+    #   readers: max concurrent readers (default: auto-detected from ulimit)
+    #   logger: callable that receives progress messages, e.g. ->(msg) { puts msg }
+    def self.aggregate(*patterns, readers: DEFAULT_MAX_READERS, logger: nil, &block)
       raise ArgumentError, "aggregate requires a block" unless block
 
       fragment_paths = patterns.flatten.flat_map { |p| p.include?("*") ? Dir.glob(p).sort : p }
       return 0 if fragment_paths.empty?
 
       Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
-        intermediates = create_intermediates(fragment_paths, readers, tmpdir)
-        kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
+        intermediates = create_intermediates(fragment_paths, readers, tmpdir, logger)
+        log(logger, "K-way merging #{intermediates.size} readers...")
+        kway_merge(intermediates.map { |f| Reader.new(f) }, logger, &block)
       end
     end
 
     class << self
       private
 
-      def create_intermediates(fragment_paths, max_readers, intermediates_dir)
+      def log(logger, message)
+        logger&.call(message)
+      end
+
+      def create_intermediates(fragment_paths, max_readers, intermediates_dir, logger)
         batch_size = (fragment_paths.size.to_f / max_readers).ceil
         batches = fragment_paths.each_slice(batch_size).to_a
 
-        batches.each_with_index.map do |batch, i|
-          intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
-          statuses = Open3.pipeline(
-            ["gunzip", "--stdout", *batch],
-            ["sort", "--field-separator", "\t", "--key", "1,1"],
-            out: intermediate
-          )
-          unless statuses.all?(&:success?)
-            raise "Failed to create intermediate file: #{intermediate}"
+        log(logger, "#{fragment_paths.size} fragments → #{batches.size} intermediates (#{batch_size} files/batch)")
+
+        intermediates = nil
+        elapsed = Benchmark.realtime do
+          intermediates = batches.each_with_index.map do |batch, i|
+            intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
+            statuses = Open3.pipeline(
+              ["gunzip", "--stdout", *batch],
+              ["sort", "--field-separator", "\t", "--key", "1,1"],
+              out: intermediate
+            )
+            unless statuses.all?(&:success?)
+              raise "Failed to create intermediate file: #{intermediate}"
+            end
+            intermediate
           end
-          intermediate
         end
+
+        log(logger, "Sorted batches in #{elapsed.round(2)}s")
+        intermediates
       end
 
-      def kway_merge(readers, &block)
+      def kway_merge(readers, logger, &block)
         unique_files = 0
 
-        loop do
-          active = readers.reject(&:exhausted?)
-          break if active.empty?
+        elapsed = Benchmark.realtime do
+          loop do
+            active = readers.reject(&:exhausted?)
+            break if active.empty?
 
-          min_path = active.map(&:file_path).min
+            min_path = active.map(&:file_path).min
 
-          merged = []
-          active.each do |reader|
-            if reader.file_path == min_path
-              merged.concat(reader.dependencies)
-              reader.advance
+            merged = []
+            active.each do |reader|
+              if reader.file_path == min_path
+                merged.concat(reader.dependencies)
+                reader.advance
+              end
             end
-          end
 
-          block.call(min_path, merged.uniq.sort)
-          unique_files += 1
+            block.call(min_path, merged.uniq.sort)
+            unique_files += 1
+          end
         end
 
         readers.each(&:close)
+
+        log(logger, "Merged #{unique_files} files in #{elapsed.round(2)}s")
         unique_files
       end
     end
