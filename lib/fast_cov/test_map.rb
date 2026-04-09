@@ -2,87 +2,136 @@
 
 require "fileutils"
 require "shellwords"
+require "zlib"
 
 module FastCov
-  # Merges multiple test mapping fragments via k-way merge.
-  #
-  # Each fragment is a gzipped TSV file mapping source files to spec directories,
-  # produced by Fragment during test runs or static analysis.
+  # In-memory test mapping that records which source files each spec depends on.
+  # Can be dumped to a gzipped TSV fragment file for later aggregation.
   #
   # Usage:
-  #   map = FastCov::TestMap.new
-  #   map.build(fragment_paths) do |source_file, spec_paths|
-  #     database.insert(source_file, spec_paths)
+  #   # Accumulate mappings (e.g., in an RSpec formatter)
+  #   test_map = FastCov::TestMap.new
+  #   test_map.add("spec/models/user_spec.rb" => coverage_result)
+  #   test_map.dump("tmp/test_mapping.node_0.gz")
+  #
+  #   # Query mappings (for smaller projects)
+  #   test_map.dependencies("app/models/user.rb")
+  #   # => ["spec/models/user_spec.rb"]
+  #
+  #   # Aggregate fragments from multiple nodes
+  #   FastCov::TestMap.aggregate("tmp/test_mapping.*.gz") do |file, spec_paths|
+  #     database.insert(file, spec_paths)
   #   end
   class TestMap
-    autoload :Fragment, File.expand_path("test_map/fragment", __dir__)
     autoload :Reader, File.expand_path("test_map/reader", __dir__)
 
     DEFAULT_MAX_READERS = 50
 
-    def initialize(max_readers: DEFAULT_MAX_READERS, intermediates_dir: nil)
-      @max_readers = max_readers
-      @intermediates_dir = intermediates_dir || "tmp/fast_cov_intermediates"
+    def initialize
+      @mapping = {}
     end
 
-    # Merge fragment files and yield each unique (source_file, spec_paths) pair.
+    # Record that spec_file depends on the given source files.
+    # Accepts a Hash of { spec_path => dependencies }.
+    def add(mappings)
+      mappings.each do |spec_path, deps|
+        deps.each do |dep|
+          next if dep == spec_path
+
+          (@mapping[dep] ||= Set.new) << spec_path
+        end
+      end
+    end
+
+    # Returns the spec paths that depend on the given file.
+    def dependencies(file)
+      (@mapping[file] || Set.new).to_a
+    end
+
+    # Write the accumulated mappings as a gzipped TSV fragment.
+    # Format: source_file\tspec_path1,spec_path2,...
+    def dump(path)
+      dir = File.dirname(path)
+      FileUtils.mkdir_p(dir) unless File.directory?(dir)
+
+      Zlib::GzipWriter.open(path) do |gzip|
+        @mapping.keys.sort.each do |file|
+          gzip.puts("#{file}\t#{@mapping[file].to_a.sort.join(",")}")
+        end
+      end
+    end
+
+    # Number of unique source files mapped.
+    def size
+      @mapping.size
+    end
+
+    # Merge multiple fragment files via k-way merge.
+    # Accepts file paths or glob patterns.
+    # Yields (source_file, spec_paths) for each unique file.
     # Returns the number of unique files yielded.
-    def build(fragment_paths)
-      raise ArgumentError, "build requires a block" unless block_given?
+    def self.aggregate(*patterns, max_readers: DEFAULT_MAX_READERS, intermediates_dir: nil, &block)
+      raise ArgumentError, "aggregate requires a block" unless block
+
+      fragment_paths = patterns.flatten.flat_map { |p| p.include?("*") ? Dir.glob(p).sort : p }
       return 0 if fragment_paths.empty?
 
-      if fragment_paths.size <= @max_readers
-        kway_merge(fragment_paths.map { |f| Reader.new(f) }) { |file, paths| yield file, paths }
+      intermediates_dir ||= "tmp/fast_cov_intermediates"
+
+      if fragment_paths.size <= max_readers
+        kway_merge(fragment_paths.map { |f| Reader.new(f) }, &block)
       else
-        intermediates = create_intermediates(fragment_paths)
+        intermediates = create_intermediates(fragment_paths, max_readers, intermediates_dir)
         begin
-          kway_merge(intermediates.map { |f| Reader.new(f) }) { |file, paths| yield file, paths }
+          kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
         ensure
           intermediates.each { |f| File.delete(f) if File.exist?(f) }
-          Dir.rmdir(@intermediates_dir) if Dir.exist?(@intermediates_dir) && Dir.empty?(@intermediates_dir)
+          Dir.rmdir(intermediates_dir) if Dir.exist?(intermediates_dir) && Dir.empty?(intermediates_dir)
         end
       end
     end
 
-    private
+    class << self
+      private
 
-    def create_intermediates(fragment_paths)
-      FileUtils.mkdir_p(@intermediates_dir)
+      def create_intermediates(fragment_paths, max_readers, intermediates_dir)
+        FileUtils.mkdir_p(intermediates_dir)
 
-      batch_size = (fragment_paths.size.to_f / @max_readers).ceil
-      batches = fragment_paths.each_slice(batch_size).to_a
+        batch_size = (fragment_paths.size.to_f / max_readers).ceil
+        batches = fragment_paths.each_slice(batch_size).to_a
 
-      batches.each_with_index.map do |batch, i|
-        intermediate = File.join(@intermediates_dir, "intermediate_#{i}.txt")
-        escaped = batch.map { |f| Shellwords.escape(f) }.join(" ")
-        system("gunzip -c #{escaped} | sort -t'\t' -k1,1 > #{Shellwords.escape(intermediate)}", exception: true)
-        intermediate
+        batches.each_with_index.map do |batch, i|
+          intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
+          escaped = batch.map { |f| Shellwords.escape(f) }.join(" ")
+          system("gunzip -c #{escaped} | sort -t'\t' -k1,1 > #{Shellwords.escape(intermediate)}", exception: true)
+          intermediate
+        end
       end
-    end
 
-    def kway_merge(readers)
-      unique_files = 0
+      def kway_merge(readers, &block)
+        unique_files = 0
 
-      loop do
-        active = readers.reject(&:exhausted?)
-        break if active.empty?
+        loop do
+          active = readers.reject(&:exhausted?)
+          break if active.empty?
 
-        min_path = active.map(&:file_path).min
+          min_path = active.map(&:file_path).min
 
-        merged_spec_paths = []
-        active.each do |reader|
-          if reader.file_path == min_path
-            merged_spec_paths.concat(reader.spec_paths)
-            reader.advance
+          merged_spec_paths = []
+          active.each do |reader|
+            if reader.file_path == min_path
+              merged_spec_paths.concat(reader.spec_paths)
+              reader.advance
+            end
           end
+
+          block.call(min_path, merged_spec_paths.uniq.sort)
+          unique_files += 1
         end
 
-        yield min_path, merged_spec_paths.uniq.sort
-        unique_files += 1
+        readers.each(&:close)
+        unique_files
       end
-
-      readers.each(&:close)
-      unique_files
     end
   end
 end
