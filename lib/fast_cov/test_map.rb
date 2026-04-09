@@ -98,7 +98,7 @@ module FastCov
           intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
           statuses = Open3.pipeline(
             ["gunzip", "--stdout", *batch],
-            ["sort", "--field-separator=\t", "--key=1,1"],
+            ["sort", "--field-separator", "\t", "--key", "1,1"],
             out: intermediate
           )
           unless statuses.all?(&:success?)
