@@ -91,8 +91,6 @@ module FastCov
       private
 
       def create_intermediates(fragment_paths, max_readers, intermediates_dir)
-        FileUtils.mkdir_p(intermediates_dir)
-
         batch_size = (fragment_paths.size.to_f / max_readers).ceil
         batches = fragment_paths.each_slice(batch_size).to_a
 
