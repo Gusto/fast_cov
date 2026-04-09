@@ -12,29 +12,29 @@ RSpec.describe FastCov::TestMap::Reader do
   describe "reading plain text files" do
     it "parses lines and advances through the file" do
       path = write_plain(tmpdir, "mapping.txt",
-        "app/models/company.rb\tspec/models/,spec/requests/",
-        "app/models/user.rb\tspec/models/",
-        "lib/util.rb\tspec/lib/"
+        "app/models/company.rb\ttest/models/,test/requests/",
+        "app/models/user.rb\ttest/models/",
+        "lib/util.rb\ttest/lib/"
       )
 
       reader = described_class.new(path)
 
       expect(reader.file_path).to eq("app/models/company.rb")
-      expect(reader.spec_paths).to eq(["spec/models/", "spec/requests/"])
+      expect(reader.dependencies).to eq(["test/models/", "test/requests/"])
       expect(reader).not_to be_exhausted
 
       reader.advance
       expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.spec_paths).to eq(["spec/models/"])
+      expect(reader.dependencies).to eq(["test/models/"])
 
       reader.advance
       expect(reader.file_path).to eq("lib/util.rb")
-      expect(reader.spec_paths).to eq(["spec/lib/"])
+      expect(reader.dependencies).to eq(["test/lib/"])
 
       reader.advance
       expect(reader).to be_exhausted
       expect(reader.file_path).to be_nil
-      expect(reader.spec_paths).to eq([])
+      expect(reader.dependencies).to eq([])
 
       reader.close
     end
@@ -43,14 +43,14 @@ RSpec.describe FastCov::TestMap::Reader do
   describe "reading gzipped files" do
     it "reads gzipped content" do
       path = write_gzip(tmpdir, "mapping.gz",
-        "app/models/user.rb\tspec/models/",
-        "lib/util.rb\tspec/lib/"
+        "app/models/user.rb\ttest/models/",
+        "lib/util.rb\ttest/lib/"
       )
 
       reader = described_class.new(path)
 
       expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.spec_paths).to eq(["spec/models/"])
+      expect(reader.dependencies).to eq(["test/models/"])
 
       reader.advance
       expect(reader.file_path).to eq("lib/util.rb")
@@ -60,21 +60,21 @@ RSpec.describe FastCov::TestMap::Reader do
   end
 
   describe "merging consecutive duplicate entries" do
-    it "merges spec paths when the same file appears on consecutive lines" do
+    it "merges dependencies when the same file appears on consecutive lines" do
       path = write_plain(tmpdir, "dupes.txt",
-        "app/models/user.rb\tspec/a/,spec/b/",
-        "app/models/user.rb\tspec/c/,spec/d/",
-        "app/models/widget.rb\tspec/e/"
+        "app/models/user.rb\ttest/a/,test/b/",
+        "app/models/user.rb\ttest/c/,test/d/",
+        "app/models/widget.rb\ttest/e/"
       )
 
       reader = described_class.new(path)
 
       expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.spec_paths).to contain_exactly("spec/a/", "spec/b/", "spec/c/", "spec/d/")
+      expect(reader.dependencies).to contain_exactly("test/a/", "test/b/", "test/c/", "test/d/")
 
       reader.advance
       expect(reader.file_path).to eq("app/models/widget.rb")
-      expect(reader.spec_paths).to eq(["spec/e/"])
+      expect(reader.dependencies).to eq(["test/e/"])
 
       reader.advance
       expect(reader).to be_exhausted
@@ -84,54 +84,54 @@ RSpec.describe FastCov::TestMap::Reader do
 
     it "merges more than two consecutive duplicates" do
       path = write_plain(tmpdir, "triple.txt",
-        "app/models/user.rb\tspec/a/",
-        "app/models/user.rb\tspec/b/",
-        "app/models/user.rb\tspec/c/",
-        "app/models/widget.rb\tspec/d/"
+        "app/models/user.rb\ttest/a/",
+        "app/models/user.rb\ttest/b/",
+        "app/models/user.rb\ttest/c/",
+        "app/models/widget.rb\ttest/d/"
       )
 
       reader = described_class.new(path)
 
       expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.spec_paths).to contain_exactly("spec/a/", "spec/b/", "spec/c/")
+      expect(reader.dependencies).to contain_exactly("test/a/", "test/b/", "test/c/")
 
       reader.close
     end
 
     it "merges duplicates at the end of the file" do
       path = write_plain(tmpdir, "end_dupes.txt",
-        "app/models/user.rb\tspec/a/",
-        "app/models/widget.rb\tspec/b/",
-        "app/models/widget.rb\tspec/c/"
+        "app/models/user.rb\ttest/a/",
+        "app/models/widget.rb\ttest/b/",
+        "app/models/widget.rb\ttest/c/"
       )
 
       reader = described_class.new(path)
       reader.advance
 
       expect(reader.file_path).to eq("app/models/widget.rb")
-      expect(reader.spec_paths).to contain_exactly("spec/b/", "spec/c/")
+      expect(reader.dependencies).to contain_exactly("test/b/", "test/c/")
 
       reader.close
     end
 
     it "does not merge non-consecutive entries" do
       path = write_plain(tmpdir, "non_consecutive.txt",
-        "app/models/user.rb\tspec/a/",
-        "app/models/widget.rb\tspec/b/",
-        "app/models/user.rb\tspec/c/"
+        "app/models/user.rb\ttest/a/",
+        "app/models/widget.rb\ttest/b/",
+        "app/models/user.rb\ttest/c/"
       )
 
       reader = described_class.new(path)
 
       expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.spec_paths).to eq(["spec/a/"])
+      expect(reader.dependencies).to eq(["test/a/"])
 
       reader.advance
       expect(reader.file_path).to eq("app/models/widget.rb")
 
       reader.advance
       expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.spec_paths).to eq(["spec/c/"])
+      expect(reader.dependencies).to eq(["test/c/"])
 
       reader.close
     end
@@ -149,13 +149,13 @@ RSpec.describe FastCov::TestMap::Reader do
       reader.close
     end
 
-    it "handles lines without spec_paths" do
-      path = write_plain(tmpdir, "no_specs.txt", "file.rb")
+    it "handles lines without dependencies" do
+      path = write_plain(tmpdir, "no_deps.txt", "file.rb")
 
       reader = described_class.new(path)
 
       expect(reader.file_path).to eq("file.rb")
-      expect(reader.spec_paths).to eq([])
+      expect(reader.dependencies).to eq([])
 
       reader.close
     end

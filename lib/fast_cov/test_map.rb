@@ -5,7 +5,7 @@ require "shellwords"
 require "zlib"
 
 module FastCov
-  # In-memory test mapping that records which source files each spec depends on.
+  # In-memory test mapping that records which files each test depends on.
   # Can be dumped to a gzipped TSV fragment file for later aggregation.
   #
   # Usage:
@@ -14,13 +14,13 @@ module FastCov
   #   test_map.add("spec/models/user_spec.rb" => coverage_result)
   #   test_map.dump("tmp/test_mapping.node_0.gz")
   #
-  #   # Query mappings (for smaller projects)
+  #   # Query mappings
   #   test_map.dependencies("app/models/user.rb")
   #   # => ["spec/models/user_spec.rb"]
   #
   #   # Aggregate fragments from multiple nodes
-  #   FastCov::TestMap.aggregate("tmp/test_mapping.*.gz") do |file, spec_paths|
-  #     database.insert(file, spec_paths)
+  #   FastCov::TestMap.aggregate("tmp/test_mapping.*.gz") do |file, dependencies|
+  #     database.insert(file, dependencies)
   #   end
   class TestMap
     autoload :Reader, File.expand_path("test_map/reader", __dir__)
@@ -31,25 +31,25 @@ module FastCov
       @mapping = {}
     end
 
-    # Record that spec_file depends on the given source files.
-    # Accepts a Hash of { spec_path => dependencies }.
+    # Record test -> dependency mappings.
+    # Accepts a Hash of { test_path => dependencies }.
     def add(mappings)
-      mappings.each do |spec_path, deps|
+      mappings.each do |test_path, deps|
         deps.each do |dep|
-          next if dep == spec_path
+          next if dep == test_path
 
-          (@mapping[dep] ||= Set.new) << spec_path
+          (@mapping[dep] ||= Set.new) << test_path
         end
       end
     end
 
-    # Returns the spec paths that depend on the given file.
+    # Returns the test paths that depend on the given file.
     def dependencies(file)
       (@mapping[file] || Set.new).to_a
     end
 
     # Write the accumulated mappings as a gzipped TSV fragment.
-    # Format: source_file\tspec_path1,spec_path2,...
+    # Format: source_file\tdep1,dep2,...
     def dump(path)
       dir = File.dirname(path)
       FileUtils.mkdir_p(dir) unless File.directory?(dir)
@@ -68,7 +68,7 @@ module FastCov
 
     # Merge multiple fragment files via k-way merge.
     # Accepts file paths or glob patterns.
-    # Yields (source_file, spec_paths) for each unique file.
+    # Yields (source_file, dependencies) for each unique file.
     # Returns the number of unique files yielded.
     def self.aggregate(*patterns, max_readers: DEFAULT_MAX_READERS, intermediates_dir: nil, &block)
       raise ArgumentError, "aggregate requires a block" unless block
@@ -117,15 +117,15 @@ module FastCov
 
           min_path = active.map(&:file_path).min
 
-          merged_spec_paths = []
+          merged = []
           active.each do |reader|
             if reader.file_path == min_path
-              merged_spec_paths.concat(reader.spec_paths)
+              merged.concat(reader.dependencies)
               reader.advance
             end
           end
 
-          block.call(min_path, merged_spec_paths.uniq.sort)
+          block.call(min_path, merged.uniq.sort)
           unique_files += 1
         end
 

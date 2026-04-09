@@ -18,7 +18,7 @@ RSpec.describe FastCov::TestMap do
       expect(test_map.dependencies("app/helpers/user_helper.rb")).to eq(["spec/models/user_spec.rb"])
     end
 
-    it "merges spec paths when multiple specs depend on the same file" do
+    it "merges dependencies when multiple tests depend on the same file" do
       test_map = described_class.new
       test_map.add("spec/models/user_spec.rb" => ["shared.rb"])
       test_map.add("spec/controllers/users_controller_spec.rb" => ["shared.rb"])
@@ -69,7 +69,7 @@ RSpec.describe FastCov::TestMap do
       expect(result.keys).to eq(["a_file.rb", "z_file.rb"])
     end
 
-    it "sorts spec paths within each entry" do
+    it "sorts dependencies within each entry" do
       test_map = described_class.new
       test_map.add("spec/z_spec.rb" => ["shared.rb"])
       test_map.add("spec/a_spec.rb" => ["shared.rb"])
@@ -103,7 +103,7 @@ RSpec.describe FastCov::TestMap do
   end
 
   describe ".aggregate" do
-    it "merges multiple fragments and yields unique files with merged spec paths" do
+    it "merges multiple fragments and yields unique files with merged dependencies" do
       f1 = write_fragment(tmpdir, "f1.gz", {
         "app/models/user.rb" => "spec/models/user_spec.rb",
         "app/models/company.rb" => "spec/models/company_spec.rb"
@@ -114,7 +114,7 @@ RSpec.describe FastCov::TestMap do
       })
 
       results = {}
-      described_class.aggregate(f1, f2) { |file, sp| results[file] = sp }
+      described_class.aggregate(f1, f2) { |file, deps| results[file] = deps }
 
       expect(results["app/models/user.rb"]).to contain_exactly(
         "spec/controllers/users_controller_spec.rb",
@@ -128,7 +128,7 @@ RSpec.describe FastCov::TestMap do
       f1 = write_fragment(tmpdir, "f1.gz", { "a.rb" => "spec/a.rb", "b.rb" => "spec/b.rb" })
       f2 = write_fragment(tmpdir, "f2.gz", { "a.rb" => "spec/c.rb", "c.rb" => "spec/c.rb" })
 
-      count = described_class.aggregate(f1, f2) { |_f, _sp| }
+      count = described_class.aggregate(f1, f2) { |_file, _deps| }
 
       expect(count).to eq(3)
     end
@@ -138,7 +138,7 @@ RSpec.describe FastCov::TestMap do
       write_fragment(tmpdir, "node_1.gz", { "b.rb" => "spec/b.rb" })
 
       results = {}
-      described_class.aggregate(File.join(tmpdir, "node_*.gz")) { |file, sp| results[file] = sp }
+      described_class.aggregate(File.join(tmpdir, "node_*.gz")) { |file, deps| results[file] = deps }
 
       expect(results).to have_key("a.rb")
       expect(results).to have_key("b.rb")
@@ -149,17 +149,17 @@ RSpec.describe FastCov::TestMap do
     end
 
     it "returns 0 for empty fragment list" do
-      count = described_class.aggregate { |_f, _sp| }
+      count = described_class.aggregate { |_file, _deps| }
 
       expect(count).to eq(0)
     end
 
-    it "deduplicates spec paths across fragments" do
+    it "deduplicates dependencies across fragments" do
       f1 = write_fragment(tmpdir, "f1.gz", { "shared.rb" => "spec/a.rb" })
       f2 = write_fragment(tmpdir, "f2.gz", { "shared.rb" => "spec/a.rb" })
 
       results = {}
-      described_class.aggregate(f1, f2) { |file, sp| results[file] = sp }
+      described_class.aggregate(f1, f2) { |file, deps| results[file] = deps }
 
       expect(results["shared.rb"]).to eq(["spec/a.rb"])
     end
@@ -169,7 +169,7 @@ RSpec.describe FastCov::TestMap do
       f2 = write_fragment(tmpdir, "f2.gz", { "m.rb" => "spec/m.rb" })
 
       order = []
-      described_class.aggregate(f1, f2) { |file, _sp| order << file }
+      described_class.aggregate(f1, f2) { |file, _deps| order << file }
 
       expect(order).to eq(order.sort)
     end
@@ -187,7 +187,7 @@ RSpec.describe FastCov::TestMap do
       map2.dump(f2)
 
       results = {}
-      described_class.aggregate(f1, f2) { |file, sp| results[file] = sp }
+      described_class.aggregate(f1, f2) { |file, deps| results[file] = deps }
 
       expect(results["app/models/user.rb"]).to contain_exactly(
         "spec/controllers/users_controller_spec.rb",
@@ -237,8 +237,8 @@ RSpec.describe FastCov::TestMap do
     result = {}
     Zlib::GzipReader.open(path) do |gzip|
       gzip.each_line do |line|
-        file, spec_paths_str = line.chomp.split("\t", 2)
-        result[file] = spec_paths_str&.split(",") || []
+        file, deps_str = line.chomp.split("\t", 2)
+        result[file] = deps_str&.split(",") || []
       end
     end
     result
