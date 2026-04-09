@@ -26,7 +26,7 @@ module FastCov
   class TestMap
     autoload :Reader, File.expand_path("test_map/reader", __dir__)
 
-    DEFAULT_MAX_READERS = 50
+    DEFAULT_MAX_READERS = [100, Process.getrlimit(Process::RLIMIT_NOFILE).first / 2].min
 
     def initialize
       @mapping = {}
@@ -71,17 +71,17 @@ module FastCov
     # Accepts file paths or glob patterns.
     # Yields (source_file, dependencies) for each unique file.
     # Returns the number of unique files yielded.
-    def self.aggregate(*patterns, max_readers: DEFAULT_MAX_READERS, &block)
+    def self.aggregate(*patterns, readers: DEFAULT_MAX_READERS, &block)
       raise ArgumentError, "aggregate requires a block" unless block
 
       fragment_paths = patterns.flatten.flat_map { |p| p.include?("*") ? Dir.glob(p).sort : p }
       return 0 if fragment_paths.empty?
 
-      if fragment_paths.size <= max_readers
+      if fragment_paths.size <= readers
         kway_merge(fragment_paths.map { |f| Reader.new(f) }, &block)
       else
         Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
-          intermediates = create_intermediates(fragment_paths, max_readers, tmpdir)
+          intermediates = create_intermediates(fragment_paths, readers, tmpdir)
           kway_merge(intermediates.map { |f| Reader.new(f) }, &block)
         end
       end

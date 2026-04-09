@@ -208,7 +208,7 @@ RSpec.describe FastCov::TestMap do
       end
 
       results = {}
-      described_class.aggregate(*fragments, max_readers: 2) do |file, deps|
+      described_class.aggregate(*fragments, readers: 2) do |file, deps|
         results[file] = deps
       end
 
@@ -221,7 +221,7 @@ RSpec.describe FastCov::TestMap do
       end
 
       results = {}
-      described_class.aggregate(*fragments, max_readers: 3) do |file, deps|
+      described_class.aggregate(*fragments, readers: 3) do |file, deps|
         results[file] = deps
       end
 
