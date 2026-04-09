@@ -84,7 +84,7 @@ module FastCov
 
       Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
         intermediates = create_intermediates(fragment_paths, readers, tmpdir, logger)
-        log(logger, "K-way merging #{intermediates.size} readers...")
+        log(logger, :start, "K-way merging #{intermediates.size} readers...")
         kway_merge(intermediates.map { |f| Reader.new(f) }, logger, &block)
       end
     end
@@ -92,15 +92,15 @@ module FastCov
     class << self
       private
 
-      def log(logger, message)
-        logger&.call(message)
+      def log(logger, status, message)
+        logger&.call(status, message)
       end
 
       def create_intermediates(fragment_paths, max_readers, intermediates_dir, logger)
         batch_size = (fragment_paths.size.to_f / max_readers).ceil
         batches = fragment_paths.each_slice(batch_size).to_a
 
-        log(logger, "#{fragment_paths.size} fragments → #{batches.size} intermediates (#{batch_size} files/batch)")
+        log(logger, :start, "#{fragment_paths.size} fragments → #{batches.size} intermediates (#{batch_size} files/batch)")
 
         intermediates = nil
         elapsed = Benchmark.realtime do
@@ -118,7 +118,7 @@ module FastCov
           end
         end
 
-        log(logger, "Sorted batches in #{elapsed.round(2)}s")
+        log(logger, :done, "Sorted batches in #{elapsed.round(2)}s")
         intermediates
       end
 
@@ -147,7 +147,7 @@ module FastCov
 
         readers.each(&:close)
 
-        log(logger, "Merged #{unique_files} files in #{elapsed.round(2)}s")
+        log(logger, :done, "Merged #{unique_files} files in #{elapsed.round(2)}s")
         unique_files
       end
     end
