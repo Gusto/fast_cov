@@ -97,7 +97,7 @@ module FastCov
         batches.each_with_index.map do |batch, i|
           intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
           escaped = batch.map { |f| Shellwords.escape(f) }.join(" ")
-          system("gunzip -c #{escaped} | sort -t'\t' -k1,1 > #{Shellwords.escape(intermediate)}", exception: true)
+          system("gunzip --stdout #{escaped} | sort --field-separator='\t' --key=1,1 > #{Shellwords.escape(intermediate)}", exception: true)
           intermediate
         end
       end
