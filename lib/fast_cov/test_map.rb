@@ -2,7 +2,6 @@
 
 require "benchmark"
 require "fileutils"
-require "open3"
 require "tmpdir"
 require "zlib"
 
@@ -106,14 +105,9 @@ module FastCov
         elapsed = Benchmark.realtime do
           intermediates = batches.each_with_index.map do |batch, i|
             intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
-            statuses = Open3.pipeline(
-              ["gunzip", "--stdout", "--", *batch],
-              ["sort", "--field-separator", "\t", "--key", "1,1"],
-              out: intermediate
-            )
-            unless statuses.all?(&:success?)
-              raise "Failed to create intermediate file: #{intermediate}"
-            end
+            lines = batch.flat_map { |f| Zlib::GzipReader.open(f) { |gz| gz.readlines } }
+            lines.sort!
+            File.write(intermediate, lines.join)
             intermediate
           end
         end
