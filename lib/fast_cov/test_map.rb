@@ -107,7 +107,7 @@ module FastCov
           intermediates = batches.each_with_index.map do |batch, i|
             intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
             statuses = Open3.pipeline(
-              ["gunzip", "--stdout", *batch],
+              ["gunzip", "--stdout", "--", *batch],
               ["sort", "--field-separator", "\t", "--key", "1,1"],
               out: intermediate
             )
