@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require "benchmark"
 require "fileutils"
-require "tmpdir"
 require "zlib"
 
 module FastCov
@@ -20,10 +18,12 @@ module FastCov
   #   # => ["spec/models/user_spec.rb"]
   #
   #   # Aggregate fragments from multiple nodes
-  #   FastCov::TestMap.aggregate("tmp/test_mapping.*.gz") do |file, dependencies|
-  #     database.insert(file, dependencies)
-  #   end
+  #   aggregator = FastCov::TestMap.aggregate(Dir["tmp/test_mapping.*.gz"])
+  #   aggregator.on(:sorted) { |elapsed| puts "Sorted in #{elapsed.round(2)}s" }
+  #   aggregator.on(:merged) { |files, elapsed| puts "Merged #{files} files in #{elapsed.round(2)}s" }
+  #   aggregator.each(10_000) { |batch| database.bulk_write(batch) }
   class TestMap
+    autoload :Aggregator, File.expand_path("test_map/aggregator", __dir__)
     autoload :Reader, File.expand_path("test_map/reader", __dir__)
 
     DEFAULT_MAX_READERS = [100, Process.getrlimit(Process::RLIMIT_NOFILE).first / 2].min
@@ -50,7 +50,6 @@ module FastCov
     end
 
     # Write the accumulated mappings as a gzipped TSV fragment.
-    # Format: source_file\tdep1,dep2,...
     def dump(path)
       dir = File.dirname(path)
       FileUtils.mkdir_p(dir) unless File.directory?(dir)
@@ -67,83 +66,11 @@ module FastCov
       @mapping.size
     end
 
-    # Merge multiple fragment files via k-way merge.
+    # Create an Aggregator for merging fragment files.
     # Accepts file paths or glob patterns.
-    # Yields (source_file, dependencies) for each unique file.
-    # Returns the number of unique files yielded.
-    #
-    # Options:
-    #   readers: max concurrent readers (default: auto-detected from ulimit)
-    #   logger: callable that receives progress messages, e.g. ->(msg) { puts msg }
-    def self.aggregate(*patterns, readers: DEFAULT_MAX_READERS, logger: nil, &block)
-      raise ArgumentError, "aggregate requires a block" unless block
-
+    def self.aggregate(*patterns, readers: DEFAULT_MAX_READERS)
       fragment_paths = patterns.flatten.flat_map { |p| p.include?("*") ? Dir.glob(p).sort : p }
-      return 0 if fragment_paths.empty?
-
-      Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
-        intermediates = create_intermediates(fragment_paths, readers, tmpdir, logger)
-        log(logger, :start, "K-way merging #{intermediates.size} readers...")
-        kway_merge(intermediates.map { |f| Reader.new(f) }, logger, &block)
-      end
-    end
-
-    class << self
-      private
-
-      def log(logger, status, message)
-        logger&.call(status, message)
-      end
-
-      def create_intermediates(fragment_paths, max_readers, intermediates_dir, logger)
-        batch_size = (fragment_paths.size.to_f / max_readers).ceil
-        batches = fragment_paths.each_slice(batch_size).to_a
-
-        log(logger, :start, "#{fragment_paths.size} fragments → #{batches.size} intermediates (#{batch_size} files/batch)")
-
-        intermediates = nil
-        elapsed = Benchmark.realtime do
-          intermediates = batches.each_with_index.map do |batch, i|
-            intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
-            lines = batch.flat_map { |f| Zlib::GzipReader.open(f) { |gz| gz.readlines } }
-            lines.sort!
-            File.write(intermediate, lines.join)
-            intermediate
-          end
-        end
-
-        log(logger, :done, "Sorted batches in #{elapsed.round(2)}s")
-        intermediates
-      end
-
-      def kway_merge(readers, logger, &block)
-        unique_files = 0
-
-        elapsed = Benchmark.realtime do
-          loop do
-            active = readers.reject(&:exhausted?)
-            break if active.empty?
-
-            min_path = active.map(&:file_path).min
-
-            merged = Set.new
-            active.each do |reader|
-              if reader.file_path == min_path
-                merged.merge(reader.dependencies)
-                reader.advance
-              end
-            end
-
-            block.call(min_path, merged.to_a.sort)
-            unique_files += 1
-          end
-        end
-
-        readers.each(&:close)
-
-        log(logger, :done, "Merged #{unique_files} files in #{elapsed.round(2)}s")
-        unique_files
-      end
+      Aggregator.new(fragment_paths, readers)
     end
   end
 end

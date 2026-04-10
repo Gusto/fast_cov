@@ -10,7 +10,7 @@ RSpec.describe FastCov::TestMap do
   after { FileUtils.rm_rf(tmpdir) }
 
   describe "#add" do
-    it "records spec -> dependency mappings" do
+    it "records test -> dependency mappings" do
       test_map = described_class.new
       test_map.add("spec/models/user_spec.rb" => ["app/models/user.rb", "app/helpers/user_helper.rb"])
 
@@ -92,129 +92,204 @@ RSpec.describe FastCov::TestMap do
   end
 
   describe ".aggregate" do
-    it "merges multiple fragments and yields unique files with merged dependencies" do
-      f1 = write_fragment(tmpdir, "f1.gz", {
-        "app/models/user.rb" => "spec/models/user_spec.rb",
-        "app/models/company.rb" => "spec/models/company_spec.rb"
-      })
-      f2 = write_fragment(tmpdir, "f2.gz", {
-        "app/models/user.rb" => "spec/controllers/users_controller_spec.rb",
-        "lib/util.rb" => "spec/lib/util_spec.rb"
-      })
+    describe "#each without batch_size" do
+      it "yields each unique file with merged dependencies" do
+        f1 = write_fragment(tmpdir, "f1.gz", {
+          "app/models/user.rb" => "spec/models/user_spec.rb",
+          "app/models/company.rb" => "spec/models/company_spec.rb"
+        })
+        f2 = write_fragment(tmpdir, "f2.gz", {
+          "app/models/user.rb" => "spec/controllers/users_controller_spec.rb",
+          "lib/util.rb" => "spec/lib/util_spec.rb"
+        })
 
-      results = {}
-      described_class.aggregate(f1, f2) { |file, deps| results[file] = deps }
+        results = {}
+        described_class.aggregate(f1, f2).each do |file, deps|
+          results[file] = deps
+        end
 
-      expect(results["app/models/user.rb"]).to contain_exactly(
-        "spec/controllers/users_controller_spec.rb",
-        "spec/models/user_spec.rb"
-      )
-      expect(results["app/models/company.rb"]).to eq(["spec/models/company_spec.rb"])
-      expect(results["lib/util.rb"]).to eq(["spec/lib/util_spec.rb"])
-    end
-
-    it "returns the number of unique files" do
-      f1 = write_fragment(tmpdir, "f1.gz", { "a.rb" => "spec/a.rb", "b.rb" => "spec/b.rb" })
-      f2 = write_fragment(tmpdir, "f2.gz", { "a.rb" => "spec/c.rb", "c.rb" => "spec/c.rb" })
-
-      count = described_class.aggregate(f1, f2) { |_file, _deps| }
-
-      expect(count).to eq(3)
-    end
-
-    it "accepts glob patterns" do
-      write_fragment(tmpdir, "node_0.gz", { "a.rb" => "spec/a.rb" })
-      write_fragment(tmpdir, "node_1.gz", { "b.rb" => "spec/b.rb" })
-
-      results = {}
-      described_class.aggregate(File.join(tmpdir, "node_*.gz")) { |file, deps| results[file] = deps }
-
-      expect(results).to have_key("a.rb")
-      expect(results).to have_key("b.rb")
-    end
-
-    it "raises without a block" do
-      expect { described_class.aggregate("anything") }.to raise_error(ArgumentError, /block/)
-    end
-
-    it "returns 0 for empty fragment list" do
-      count = described_class.aggregate { |_file, _deps| }
-
-      expect(count).to eq(0)
-    end
-
-    it "deduplicates dependencies across fragments" do
-      f1 = write_fragment(tmpdir, "f1.gz", { "shared.rb" => "spec/a.rb" })
-      f2 = write_fragment(tmpdir, "f2.gz", { "shared.rb" => "spec/a.rb" })
-
-      results = {}
-      described_class.aggregate(f1, f2) { |file, deps| results[file] = deps }
-
-      expect(results["shared.rb"]).to eq(["spec/a.rb"])
-    end
-
-    it "yields files in sorted order" do
-      f1 = write_fragment(tmpdir, "f1.gz", { "z.rb" => "spec/z.rb", "a.rb" => "spec/a.rb" })
-      f2 = write_fragment(tmpdir, "f2.gz", { "m.rb" => "spec/m.rb" })
-
-      order = []
-      described_class.aggregate(f1, f2) { |file, _deps| order << file }
-
-      expect(order).to eq(order.sort)
-    end
-
-    it "round-trips through dump and aggregate" do
-      map1 = described_class.new
-      map1.add("spec/models/user_spec.rb" => ["app/models/user.rb", "shared.rb"])
-      map1.add("spec/models/company_spec.rb" => ["app/models/company.rb"])
-      f1 = File.join(tmpdir, "map1.gz")
-      map1.dump(f1)
-
-      map2 = described_class.new
-      map2.add("spec/controllers/users_controller_spec.rb" => ["app/models/user.rb", "shared.rb"])
-      f2 = File.join(tmpdir, "map2.gz")
-      map2.dump(f2)
-
-      results = {}
-      described_class.aggregate(f1, f2) { |file, deps| results[file] = deps }
-
-      expect(results["app/models/user.rb"]).to contain_exactly(
-        "spec/controllers/users_controller_spec.rb",
-        "spec/models/user_spec.rb"
-      )
-      expect(results["shared.rb"]).to contain_exactly(
-        "spec/controllers/users_controller_spec.rb",
-        "spec/models/user_spec.rb"
-      )
-      expect(results["app/models/company.rb"]).to eq(["spec/models/company_spec.rb"])
-    end
-  end
-
-  describe "intermediate batching" do
-    it "creates intermediates when fragment count exceeds max_readers" do
-      fragments = 5.times.map do |i|
-        write_fragment(tmpdir, "f#{i}.gz", { "file_#{i}.rb" => "test/#{i}.rb" })
+        expect(results["app/models/user.rb"]).to contain_exactly(
+          "spec/controllers/users_controller_spec.rb",
+          "spec/models/user_spec.rb"
+        )
+        expect(results["app/models/company.rb"]).to eq(["spec/models/company_spec.rb"])
+        expect(results["lib/util.rb"]).to eq(["spec/lib/util_spec.rb"])
       end
 
-      results = {}
-      described_class.aggregate(*fragments, readers: 2) do |file, deps|
-        results[file] = deps
+      it "deduplicates dependencies across fragments" do
+        f1 = write_fragment(tmpdir, "f1.gz", { "shared.rb" => "spec/a.rb" })
+        f2 = write_fragment(tmpdir, "f2.gz", { "shared.rb" => "spec/a.rb" })
+
+        results = {}
+        described_class.aggregate(f1, f2).each { |file, deps| results[file] = deps }
+
+        expect(results["shared.rb"]).to eq(["spec/a.rb"])
       end
 
-      expect(results.size).to eq(5)
+      it "yields files in sorted order" do
+        f1 = write_fragment(tmpdir, "f1.gz", { "z.rb" => "spec/z.rb", "a.rb" => "spec/a.rb" })
+        f2 = write_fragment(tmpdir, "f2.gz", { "m.rb" => "spec/m.rb" })
+
+        order = []
+        described_class.aggregate(f1, f2).each { |file, _deps| order << file }
+
+        expect(order).to eq(order.sort)
+      end
     end
 
-    it "merges overlapping entries across intermediates" do
-      fragments = 10.times.map do |i|
-        write_fragment(tmpdir, "f#{i}.gz", { "shared.rb" => "test/#{i}.rb" })
+    describe "#each with batch_size" do
+      it "yields hashes of up to batch_size entries" do
+        f1 = write_fragment(tmpdir, "f1.gz", {
+          "a.rb" => "spec/a.rb",
+          "b.rb" => "spec/b.rb",
+          "c.rb" => "spec/c.rb"
+        })
+
+        batches = []
+        described_class.aggregate(f1).each(2) { |batch| batches << batch }
+
+        expect(batches.size).to eq(2)
+        expect(batches[0].size).to eq(2)
+        expect(batches[1].size).to eq(1)
+        expect(batches.flat_map(&:keys)).to contain_exactly("a.rb", "b.rb", "c.rb")
       end
 
-      results = {}
-      described_class.aggregate(*fragments, readers: 3) do |file, deps|
-        results[file] = deps
+      it "handles exact batch_size multiples" do
+        f1 = write_fragment(tmpdir, "f1.gz", {
+          "a.rb" => "spec/a.rb",
+          "b.rb" => "spec/b.rb"
+        })
+
+        batches = []
+        described_class.aggregate(f1).each(2) { |batch| batches << batch }
+
+        expect(batches.size).to eq(1)
+        expect(batches[0].size).to eq(2)
       end
 
-      expect(results["shared.rb"].size).to eq(10)
+      it "merges dependencies across fragments within batches" do
+        f1 = write_fragment(tmpdir, "f1.gz", { "shared.rb" => "spec/a.rb" })
+        f2 = write_fragment(tmpdir, "f2.gz", { "shared.rb" => "spec/b.rb" })
+
+        batches = []
+        described_class.aggregate(f1, f2).each(100) { |batch| batches << batch }
+
+        expect(batches[0]["shared.rb"]).to contain_exactly("spec/a.rb", "spec/b.rb")
+      end
+    end
+
+    describe "#each raises without a block" do
+      it "raises ArgumentError" do
+        expect { described_class.aggregate.each }.to raise_error(ArgumentError, /block/)
+      end
+    end
+
+    describe "#each with empty fragments" do
+      it "does not yield" do
+        yielded = false
+        described_class.aggregate.each { |_f, _d| yielded = true }
+
+        expect(yielded).to be false
+      end
+    end
+
+    describe "glob patterns" do
+      it "expands glob patterns" do
+        write_fragment(tmpdir, "node_0.gz", { "a.rb" => "spec/a.rb" })
+        write_fragment(tmpdir, "node_1.gz", { "b.rb" => "spec/b.rb" })
+
+        results = {}
+        described_class.aggregate(File.join(tmpdir, "node_*.gz")).each { |file, deps| results[file] = deps }
+
+        expect(results).to have_key("a.rb")
+        expect(results).to have_key("b.rb")
+      end
+    end
+
+    describe "hooks" do
+      it "emits :sort and :sorted events" do
+        f1 = write_fragment(tmpdir, "f1.gz", { "a.rb" => "spec/a.rb" })
+        f2 = write_fragment(tmpdir, "f2.gz", { "b.rb" => "spec/b.rb" })
+
+        sort_args = nil
+        sorted_elapsed = nil
+
+        aggregator = described_class.aggregate(f1, f2)
+        aggregator.on(:sort) { |fragments, batches| sort_args = [fragments, batches] }
+        aggregator.on(:sorted) { |elapsed| sorted_elapsed = elapsed }
+        aggregator.each { |_f, _d| }
+
+        expect(sort_args).to eq([2, 2])
+        expect(sorted_elapsed).to be_a(Float)
+        expect(sorted_elapsed).to be >= 0
+      end
+
+      it "emits :merged event" do
+        f1 = write_fragment(tmpdir, "f1.gz", { "a.rb" => "spec/a.rb", "b.rb" => "spec/b.rb" })
+
+        merged_args = nil
+
+        aggregator = described_class.aggregate(f1)
+        aggregator.on(:merged) { |files, elapsed| merged_args = [files, elapsed] }
+        aggregator.each { |_f, _d| }
+
+        expect(merged_args[0]).to eq(2)
+        expect(merged_args[1]).to be_a(Float)
+      end
+
+      it "supports chaining on calls" do
+        f1 = write_fragment(tmpdir, "f1.gz", { "a.rb" => "spec/a.rb" })
+
+        events = []
+        described_class.aggregate(f1)
+          .on(:sort) { |*_| events << :sort }
+          .on(:sorted) { |*_| events << :sorted }
+          .on(:merged) { |*_| events << :merged }
+          .each { |_f, _d| }
+
+        expect(events).to eq([:sort, :sorted, :merged])
+      end
+    end
+
+    describe "round-trip" do
+      it "dumps and aggregates correctly" do
+        map1 = described_class.new
+        map1.add("spec/models/user_spec.rb" => ["app/models/user.rb", "shared.rb"])
+        map1.add("spec/models/company_spec.rb" => ["app/models/company.rb"])
+        f1 = File.join(tmpdir, "map1.gz")
+        map1.dump(f1)
+
+        map2 = described_class.new
+        map2.add("spec/controllers/users_controller_spec.rb" => ["app/models/user.rb", "shared.rb"])
+        f2 = File.join(tmpdir, "map2.gz")
+        map2.dump(f2)
+
+        results = {}
+        described_class.aggregate(f1, f2).each { |file, deps| results[file] = deps }
+
+        expect(results["app/models/user.rb"]).to contain_exactly(
+          "spec/controllers/users_controller_spec.rb",
+          "spec/models/user_spec.rb"
+        )
+        expect(results["shared.rb"]).to contain_exactly(
+          "spec/controllers/users_controller_spec.rb",
+          "spec/models/user_spec.rb"
+        )
+        expect(results["app/models/company.rb"]).to eq(["spec/models/company_spec.rb"])
+      end
+    end
+
+    describe "intermediate batching" do
+      it "merges overlapping entries across intermediates" do
+        fragments = 10.times.map do |i|
+          write_fragment(tmpdir, "f#{i}.gz", { "shared.rb" => "test/#{i}.rb" })
+        end
+
+        results = {}
+        described_class.aggregate(*fragments, readers: 3).each { |file, deps| results[file] = deps }
+
+        expect(results["shared.rb"].size).to eq(10)
+      end
     end
   end
 
@@ -234,8 +309,8 @@ RSpec.describe FastCov::TestMap do
   def write_fragment(dir, name, mapping)
     path = File.join(dir, name)
     Zlib::GzipWriter.open(path) do |gzip|
-      mapping.keys.sort.each do |file|
-        gzip.puts("#{file}\t#{mapping[file]}")
+      mapping.each do |file, deps|
+        gzip.puts("#{file}\t#{deps}")
       end
     end
     path
