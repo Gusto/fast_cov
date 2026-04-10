@@ -58,7 +58,7 @@ RSpec.describe FastCov::TestMap do
   end
 
   describe "#dump" do
-    it "writes gzipped TSV sorted by file path" do
+    it "writes gzipped TSV" do
       test_map = described_class.new
       test_map.add("spec/models/user_spec.rb" => ["z_file.rb", "a_file.rb"])
 
@@ -66,19 +66,8 @@ RSpec.describe FastCov::TestMap do
       test_map.dump(path)
       result = read_gzip(path)
 
-      expect(result.keys).to eq(["a_file.rb", "z_file.rb"])
-    end
-
-    it "sorts dependencies within each entry" do
-      test_map = described_class.new
-      test_map.add("spec/z_spec.rb" => ["shared.rb"])
-      test_map.add("spec/a_spec.rb" => ["shared.rb"])
-
-      path = File.join(tmpdir, "output.gz")
-      test_map.dump(path)
-      result = read_gzip(path)
-
-      expect(result["shared.rb"]).to eq(result["shared.rb"].sort)
+      expect(result).to have_key("a_file.rb")
+      expect(result).to have_key("z_file.rb")
     end
 
     it "creates parent directories if needed" do

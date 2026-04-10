@@ -56,8 +56,8 @@ module FastCov
       FileUtils.mkdir_p(dir) unless File.directory?(dir)
 
       Zlib::GzipWriter.open(path) do |gzip|
-        @mapping.keys.sort.each do |file|
-          gzip.puts("#{file}\t#{@mapping[file].to_a.sort.join(",")}")
+        @mapping.each do |file, deps|
+          gzip.puts("#{file}\t#{deps.to_a.join(",")}")
         end
       end
     end
