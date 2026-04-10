@@ -26,6 +26,7 @@ module FastCov
       # Events:
       #   :sort    — before sorting. Yields (fragment_count, batch_count)
       #   :sorted  — after sorting. Yields (elapsed)
+      #   :merge   — during merge. Yields (processed_lines, total_lines)
       #   :merged  — after merging. Yields (file_count, elapsed)
       def on(event, &block)
         @hooks[event] = block
@@ -41,12 +42,13 @@ module FastCov
 
         Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
           intermediates = create_intermediates(tmpdir)
+          total_lines = intermediates.sum { |f| File.foreach(f).count }
           readers = intermediates.map { |f| Reader.new(f) }
 
           if batch_size
-            merge_batched(readers, batch_size, &block)
+            merge_batched(readers, batch_size, total_lines, &block)
           else
-            merge_unbatched(readers, &block)
+            merge_unbatched(readers, total_lines, &block)
           end
         end
       end
@@ -78,8 +80,9 @@ module FastCov
         intermediates
       end
 
-      def merge_unbatched(readers)
+      def merge_unbatched(readers, total_lines)
         unique_files = 0
+        processed_lines = 0
 
         elapsed = Benchmark.realtime do
           loop do
@@ -91,11 +94,13 @@ module FastCov
             merged = Set.new
             active.each do |reader|
               if reader.file_path == min_path
+                processed_lines += 1
                 merged.merge(reader.dependencies)
                 reader.advance
               end
             end
 
+            emit(:merge, processed_lines, total_lines)
             yield min_path, merged.to_a.sort
             unique_files += 1
           end
@@ -105,8 +110,9 @@ module FastCov
         emit(:merged, unique_files, elapsed)
       end
 
-      def merge_batched(readers, batch_size)
+      def merge_batched(readers, batch_size, total_lines)
         unique_files = 0
+        processed_lines = 0
         batch = {}
 
         elapsed = Benchmark.realtime do
@@ -119,10 +125,13 @@ module FastCov
             merged = Set.new
             active.each do |reader|
               if reader.file_path == min_path
+                processed_lines += 1
                 merged.merge(reader.dependencies)
                 reader.advance
               end
             end
+
+            emit(:merge, processed_lines, total_lines)
 
             batch[min_path] = merged.to_a.sort
             unique_files += 1
