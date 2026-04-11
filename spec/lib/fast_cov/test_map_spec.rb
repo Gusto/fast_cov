@@ -92,8 +92,8 @@ RSpec.describe FastCov::TestMap do
   end
 
   describe ".aggregate" do
-    describe "#each without batch_size" do
-      it "yields each unique file with merged dependencies" do
+    describe "#each" do
+      it "yields hashes with merged dependencies" do
         f1 = write_fragment(tmpdir, "f1.gz", {
           "app/models/user.rb" => "spec/models/user_spec.rb",
           "app/models/company.rb" => "spec/models/company_spec.rb"
@@ -104,9 +104,7 @@ RSpec.describe FastCov::TestMap do
         })
 
         results = {}
-        described_class.aggregate(f1, f2).each do |file, deps|
-          results[file] = deps
-        end
+        described_class.aggregate(f1, f2).each { |batch| results.merge!(batch) }
 
         expect(results["app/models/user.rb"]).to contain_exactly(
           "spec/controllers/users_controller_spec.rb",
@@ -121,7 +119,7 @@ RSpec.describe FastCov::TestMap do
         f2 = write_fragment(tmpdir, "f2.gz", { "shared.rb" => "spec/a.rb" })
 
         results = {}
-        described_class.aggregate(f1, f2).each { |file, deps| results[file] = deps }
+        described_class.aggregate(f1, f2).each { |batch| results.merge!(batch) }
 
         expect(results["shared.rb"]).to eq(["spec/a.rb"])
       end
@@ -131,14 +129,12 @@ RSpec.describe FastCov::TestMap do
         f2 = write_fragment(tmpdir, "f2.gz", { "m.rb" => "spec/m.rb" })
 
         order = []
-        described_class.aggregate(f1, f2).each { |file, _deps| order << file }
+        described_class.aggregate(f1, f2).each { |batch| order.concat(batch.keys) }
 
         expect(order).to eq(order.sort)
       end
-    end
 
-    describe "#each with batch_size" do
-      it "yields hashes of up to batch_size entries" do
+      it "batches entries by batch_size" do
         f1 = write_fragment(tmpdir, "f1.gz", {
           "a.rb" => "spec/a.rb",
           "b.rb" => "spec/b.rb",
@@ -167,27 +163,13 @@ RSpec.describe FastCov::TestMap do
         expect(batches[0].size).to eq(2)
       end
 
-      it "merges dependencies across fragments within batches" do
-        f1 = write_fragment(tmpdir, "f1.gz", { "shared.rb" => "spec/a.rb" })
-        f2 = write_fragment(tmpdir, "f2.gz", { "shared.rb" => "spec/b.rb" })
-
-        batches = []
-        described_class.aggregate(f1, f2).each(100) { |batch| batches << batch }
-
-        expect(batches[0]["shared.rb"]).to contain_exactly("spec/a.rb", "spec/b.rb")
-      end
-    end
-
-    describe "#each raises without a block" do
-      it "raises ArgumentError" do
+      it "raises without a block" do
         expect { described_class.aggregate.each }.to raise_error(ArgumentError, /block/)
       end
-    end
 
-    describe "#each with empty fragments" do
-      it "does not yield" do
+      it "does not yield for empty fragments" do
         yielded = false
-        described_class.aggregate.each { |_f, _d| yielded = true }
+        described_class.aggregate.each { |_batch| yielded = true }
 
         expect(yielded).to be false
       end
@@ -199,7 +181,7 @@ RSpec.describe FastCov::TestMap do
         write_fragment(tmpdir, "node_1.gz", { "b.rb" => "spec/b.rb" })
 
         results = {}
-        described_class.aggregate(File.join(tmpdir, "node_*.gz")).each { |file, deps| results[file] = deps }
+        described_class.aggregate(File.join(tmpdir, "node_*.gz")).each { |batch| results.merge!(batch) }
 
         expect(results).to have_key("a.rb")
         expect(results).to have_key("b.rb")
@@ -217,7 +199,7 @@ RSpec.describe FastCov::TestMap do
         aggregator = described_class.aggregate(f1, f2)
         aggregator.on(:sort) { |fragments, batches| sort_args = [fragments, batches] }
         aggregator.on(:sorted) { |elapsed| sorted_elapsed = elapsed }
-        aggregator.each { |_f, _d| }
+        aggregator.each { |_batch| }
 
         expect(sort_args).to eq([2, 2])
         expect(sorted_elapsed).to be_a(Float)
@@ -231,7 +213,7 @@ RSpec.describe FastCov::TestMap do
 
         aggregator = described_class.aggregate(f1)
         aggregator.on(:merged) { |files, elapsed| merged_args = [files, elapsed] }
-        aggregator.each { |_f, _d| }
+        aggregator.each { |_batch| }
 
         expect(merged_args[0]).to eq(2)
         expect(merged_args[1]).to be_a(Float)
@@ -245,7 +227,7 @@ RSpec.describe FastCov::TestMap do
           .on(:sort) { |*_| events << :sort }
           .on(:sorted) { |*_| events << :sorted }
           .on(:merged) { |*_| events << :merged }
-          .each { |_f, _d| }
+          .each { |_batch| }
 
         expect(events).to eq([:sort, :sorted, :merged])
       end
@@ -265,7 +247,7 @@ RSpec.describe FastCov::TestMap do
         map2.dump(f2)
 
         results = {}
-        described_class.aggregate(f1, f2).each { |file, deps| results[file] = deps }
+        described_class.aggregate(f1, f2).each { |batch| results.merge!(batch) }
 
         expect(results["app/models/user.rb"]).to contain_exactly(
           "spec/controllers/users_controller_spec.rb",
@@ -286,7 +268,7 @@ RSpec.describe FastCov::TestMap do
         end
 
         results = {}
-        described_class.aggregate(*fragments, readers: 3).each { |file, deps| results[file] = deps }
+        described_class.aggregate(*fragments, readers: 3).each { |batch| results.merge!(batch) }
 
         expect(results["shared.rb"].size).to eq(10)
       end

@@ -33,9 +33,9 @@ module FastCov
       end
 
       # Iterate over merged results.
-      # Without batch_size: yields (file_path, dependencies) per file.
-      # With batch_size: yields a Hash of { file => dependencies } per batch.
-      def each(batch_size = nil, &block)
+      # Yields a Hash of { file => dependencies } per batch.
+      # Default batch_size is 1.
+      def each(batch_size = 1, &block)
         raise ArgumentError, "each requires a block" unless block
         return if @fragment_paths.empty?
 
@@ -86,7 +86,7 @@ module FastCov
       def kway_merge(readers, batch_size, total_lines, &block)
         unique_files = 0
         processed_lines = 0
-        batch = batch_size ? {} : nil
+        batch = {}
 
         _, elapsed = measure do
           loop do
@@ -107,19 +107,15 @@ module FastCov
             emit(:merge, processed_lines, total_lines)
             unique_files += 1
 
-            if batch
-              batch[min_path] = merged.to_a.sort
-              if batch.size >= batch_size
-                block.call(batch)
-                batch = {}
-              end
-            else
-              block.call(min_path, merged.to_a.sort)
+            batch[min_path] = merged.to_a.sort
+            if batch.size >= batch_size
+              block.call(batch)
+              batch = {}
             end
           end
         end
 
-        block.call(batch) if batch && !batch.empty?
+        block.call(batch) unless batch.empty?
 
         emit(:merged, unique_files, elapsed)
       end
