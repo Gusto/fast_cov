@@ -56,9 +56,9 @@ module FastCov
           return
         end
 
-        file_path, deps_str = line.chomp.split("\t", 2)
-        @next_file_path = file_path
-        @next_dependencies = deps_str&.split(",") || []
+        parts = line.chomp.split("\t")
+        @next_file_path = parts[0]
+        @next_dependencies = parts[1..] || []
       end
     end
   end

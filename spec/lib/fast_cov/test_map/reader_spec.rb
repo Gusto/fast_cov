@@ -12,7 +12,7 @@ RSpec.describe FastCov::TestMap::Reader do
   describe "reading plain text files" do
     it "parses lines and advances through the file" do
       path = write_plain(tmpdir, "mapping.txt",
-        "app/models/company.rb\ttest/models/,test/requests/",
+        "app/models/company.rb\ttest/models/\ttest/requests/",
         "app/models/user.rb\ttest/models/",
         "lib/util.rb\ttest/lib/"
       )
@@ -62,8 +62,8 @@ RSpec.describe FastCov::TestMap::Reader do
   describe "merging consecutive duplicate entries" do
     it "merges dependencies when the same file appears on consecutive lines" do
       path = write_plain(tmpdir, "dupes.txt",
-        "app/models/user.rb\ttest/a/,test/b/",
-        "app/models/user.rb\ttest/c/,test/d/",
+        "app/models/user.rb\ttest/a/\ttest/b/",
+        "app/models/user.rb\ttest/c/\ttest/d/",
         "app/models/widget.rb\ttest/e/"
       )
 

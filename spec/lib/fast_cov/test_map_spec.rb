@@ -299,8 +299,8 @@ RSpec.describe FastCov::TestMap do
     result = {}
     Zlib::GzipReader.open(path) do |gzip|
       gzip.each_line do |line|
-        file, deps_str = line.chomp.split("\t", 2)
-        result[file] = deps_str&.split(",") || []
+        parts = line.chomp.split("\t")
+        result[parts[0]] = parts[1..] || []
       end
     end
     result
@@ -310,7 +310,8 @@ RSpec.describe FastCov::TestMap do
     path = File.join(dir, name)
     Zlib::GzipWriter.open(path) do |gzip|
       mapping.each do |file, deps|
-        gzip.puts("#{file}\t#{deps}")
+        deps = Array(deps)
+        gzip.puts([file, *deps].join("\t"))
       end
     end
     path

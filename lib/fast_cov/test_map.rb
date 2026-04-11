@@ -56,7 +56,7 @@ module FastCov
 
       Zlib::GzipWriter.open(path) do |gzip|
         @mapping.each do |file, deps|
-          gzip.puts("#{file}\t#{deps.to_a.join(",")}")
+          gzip.puts("#{file}\t#{deps.to_a.join("\t")}")
         end
       end
     end
