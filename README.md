@@ -6,7 +6,7 @@ FastCov hooks directly into the Ruby VM's event system, avoiding the overhead of
 
 ## Requirements
 
-- Ruby >= 3.4.0 (MRI only)
+- Ruby >= 3.2.0 (MRI only)
 - macOS or Linux
 
 ## Installation
@@ -32,7 +32,7 @@ coverage = FastCov::CoverageMap.new
 coverage.root = File.expand_path("app")
 coverage.use(FastCov::FileTracker)
 
-result = coverage.start do
+result = coverage.build do
   # ... run a test ...
 end
 
@@ -53,6 +53,8 @@ coverage.ignored_paths = Rails.root.join("vendor")
 
 coverage.use(FastCov::FileTracker)
 coverage.use(FastCov::FactoryBotTracker)
+coverage.use(FastCov::ConstGetTracker)
+coverage.use(FastCov::FixtureKitTracker)
 ```
 
 ### Options
@@ -66,9 +68,13 @@ coverage.use(FastCov::FactoryBotTracker)
 ### Lifecycle
 
 ```ruby
-coverage.start        # starts tracking and returns the CoverageMap
-coverage.stop         # stops tracking and returns a Set
-coverage.start { ... } # block form: start, yield, stop
+coverage.start         # starts tracking, returns self
+result = coverage.stop # stops tracking, returns a Set
+
+# Block form: start, yield, stop
+result = coverage.build do
+  # ...
+end
 ```
 
 Native line coverage is always enabled. Extra trackers registered with `use` are additive.
@@ -77,7 +83,11 @@ Native line coverage is always enabled. Extra trackers registered with `use` are
 
 ### FileTracker
 
-Tracks files read from disk during coverage, including JSON, YAML, ERB templates, and any file accessed via `File.read` or read-mode `File.open`.
+Tracks files read from disk during coverage, including YAML, JSON, ERB templates, and any file accessed via `File.read`, read-mode `File.open`, `YAML.load_file`, `YAML.safe_load_file`, or `YAML.unsafe_load_file`.
+
+The YAML methods are patched directly to handle Bootsnap's compile cache, which bypasses `File.open` for YAML files.
+
+When a file is read indirectly (e.g., `YAML.load_file` calling through Psych), the tracker walks the caller stack to find the first in-root frame and creates a connected dependency.
 
 ```ruby
 coverage.use(FastCov::FileTracker)
@@ -107,61 +117,111 @@ This catches patterns such as:
 
 It does not catch direct constant references such as `Foo::Bar` in source code.
 
-## Low-level native coverage
+### FixtureKitTracker
 
-`FastCov::Coverage` is still available as a low-level primitive:
+Tracks [fixture_kit](https://github.com/Gusto/fixture_kit) fixture definition files when fixtures are used. Requires fixture_kit >= 0.14.0.
+
+Fixture definitions run once during cache generation (`before(:context)`), then every test replays cached SQL without executing Ruby. This tracker uses fixture_kit's callback hooks to:
+
+1. Track files touched during fixture generation and create connected dependencies
+2. Record fixture definition files (including parent chain) when tests mount fixtures
 
 ```ruby
-cov = FastCov::Coverage.new(
-  root: "/repo/app",
-  ignored_paths: ["/repo/app/vendor"],
-  threads: true
-)
+coverage.use(FastCov::FixtureKitTracker)
 ```
-
-This API is mainly useful for internal use and low-level tests. `CoverageMap` is the intended public orchestration API.
 
 ## StaticMap
 
-`FastCov::StaticMap` is a build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and builds a direct dependency graph. Transitive closures are computed lazily on demand.
+`FastCov::StaticMap` is a build-time API for static dependency mapping. It parses Ruby files with Prism, resolves literal constant references, and builds a dependency graph. Transitive closures are computed lazily on demand.
 
 ```ruby
 static_map = FastCov::StaticMap.new(root: Rails.root)
 static_map.build("spec/**/*_spec.rb")
 
 # Direct dependencies for a single file
-static_map.dependencies("/app/spec/models/user_spec.rb")
-# => ["/app/app/models/user.rb"]
+static_map.direct_dependencies("spec/models/user_spec.rb")
+# => ["app/models/user.rb"]
 
-# Transitive closure (computed and cached on first call)
-static_map.transitive_dependencies("/app/spec/models/user_spec.rb")
-# => ["/app/app/models/account.rb", "/app/app/models/user.rb"]
-
-# Raw direct graph
-static_map.direct_graph
-# => { "/app/spec/models/user_spec.rb" => ["/app/app/models/user.rb"], ... }
+# Transitive dependencies (computed and cached on first call)
+static_map.dependencies("spec/models/user_spec.rb")
+# => ["app/models/user.rb", "app/models/account.rb"]
 ```
 
 The instance caches constant resolution results, so reusing the same instance across multiple `build` calls is efficient.
 
-#### Options
+### Options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `root` | String or Pathname | required | Absolute project root. Only resolved files under this path are included. |
-| `ignored_paths` | String or Array<String> | `[]` | Files or directories to exclude from the graph and recursive traversal. |
-| `*patterns` (on `build`) | String(s) or Array | required | File paths or globs to traverse. Relative paths are expanded against `root`. |
+| `ignored_paths` | String or Array | `[]` | Files or directories to exclude from the graph and recursive traversal. |
+| `concurrency` | Integer | `Etc.nprocessors` | Number of threads for parallel file parsing. |
 
-#### How it works
+### How it works
 
-- `build` traverses reachable files and stores a direct dependency graph
-- `dependencies` returns direct dependencies for a file
-- `transitive_dependencies` computes and caches the transitive closure lazily
+- `build(*patterns)` traverses reachable files and stores a direct dependency graph
+- `direct_dependencies(file)` returns direct dependencies for a file
+- `dependencies(file)` computes and caches the transitive closure lazily
 - Constant resolution results are cached and reused across `build` calls
 - Resolves each reference from most-specific lexical candidate to least-specific
 - Uses `const_defined?` and `const_source_location` to resolve literal constant references to source files
 
 This is intended for a booted application process. It requires constants to be eager-loaded. It will not see dynamic constant lookups that are not expressed as literal constants in the source.
+
+## TestMap
+
+`FastCov::TestMap` handles test mapping serialization and aggregation. It accumulates mappings from test runs, writes gzipped fragment files, and merges fragments from multiple CI nodes.
+
+### Accumulating mappings
+
+```ruby
+test_map = FastCov::TestMap.new
+
+# Record which files each test depends on
+test_map.add("spec/models/" => coverage_map.stop)
+
+# Query: which tests cover this file?
+test_map.dependencies("app/models/user.rb")
+# => ["spec/models/"]
+
+# Write gzipped fragment for later aggregation
+test_map.dump("tmp/test_mapping.node_0.gz")
+```
+
+### Aggregating fragments
+
+Merge fragments from multiple CI nodes via k-way merge:
+
+```ruby
+aggregator = FastCov::TestMap.aggregate(Dir["tmp/test_mapping.*.gz"])
+
+# Hook into progress events
+aggregator.on(:sort) { |fragments, batches| puts "#{fragments} fragments -> #{batches} batches" }
+aggregator.on(:sorted) { |elapsed| puts "Sorted in #{elapsed.round(2)}s" }
+aggregator.on(:merge) { |processed, total| print "#{processed}/#{total}\r" }
+aggregator.on(:merged) { |files, elapsed| puts "Merged #{files} files in #{elapsed.round(2)}s" }
+
+# Iterate in batches — yields Hash of { file => [deps] }
+aggregator.each(10_000) do |batch|
+  database.bulk_write(batch)
+end
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `readers:` | Integer | `min(100, ulimit/2)` | Max concurrent readers for k-way merge. Auto-detected from OS file descriptor limit. |
+
+### Fragment format
+
+Tab-delimited, gzipped. One line per source file, first column is the file, remaining columns are dependencies:
+
+```
+source_file\tdep1\tdep2\tdep3
+```
+
+Aggregation owns sorting — fragments are unsorted, intermediates are sorted during the merge process using pure Ruby (no shell commands).
 
 ## Writing custom trackers
 
@@ -200,6 +260,7 @@ end
 - thread-aware recording
 - lifecycle management
 - class-level `record` dispatch for patched hooks
+- caller stack traversal via `Utils.resolve_caller` for indirect calls
 
 ```ruby
 class MyTracker < FastCov::AbstractTracker
@@ -209,7 +270,8 @@ class MyTracker < FastCov::AbstractTracker
 
   module MyPatch
     def some_method(...)
-      MyTracker.record { some_file_path }
+      # record(path) auto-resolves the caller via stack traversal
+      MyTracker.record(some_file_path)
       super
     end
   end
