@@ -39,7 +39,7 @@ module FastCov
         raise ArgumentError, "each requires a block" unless block
         return if @fragment_paths.empty?
 
-        Dir.mktmpdir("fast_cov_aggregation") do |tmpdir|
+        Dir.mktmpdir("fastcov") do |tmpdir|
           intermediates = create_intermediates(tmpdir)
           total_lines = intermediates.sum { |f| File.foreach(f).count }
           readers = intermediates.map { |f| Reader.new(f) }
