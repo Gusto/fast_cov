@@ -33,7 +33,7 @@ RSpec.describe FastCov::TestMap do
       test_map = described_class.new
       test_map.add("spec/models/user_spec.rb" => ["spec/models/user_spec.rb", "app/models/user.rb"])
 
-      expect(test_map.dependencies("spec/models/user_spec.rb")).to be_empty
+      expect(test_map.dependencies("spec/models/user_spec.rb")).to be_nil
       expect(test_map.dependencies("app/models/user.rb")).to eq(["spec/models/user_spec.rb"])
     end
 
@@ -50,10 +50,10 @@ RSpec.describe FastCov::TestMap do
   end
 
   describe "#dependencies" do
-    it "returns an empty array for unknown files" do
+    it "returns nil for unknown files" do
       test_map = described_class.new
 
-      expect(test_map.dependencies("unknown.rb")).to eq([])
+      expect(test_map.dependencies("unknown.rb")).to be_nil
     end
   end
 

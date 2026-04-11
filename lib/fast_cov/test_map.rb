@@ -46,7 +46,7 @@ module FastCov
 
     # Returns the test paths that depend on the given file.
     def dependencies(file)
-      (@mapping[file] || Set.new).to_a
+      @mapping[file]&.to_a
     end
 
     # Write the accumulated mappings as a gzipped TSV fragment.
