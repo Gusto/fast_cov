@@ -70,11 +70,11 @@ module FastCov
         total_lines = 0
         intermediates, elapsed = measure do
           batches.each_with_index.map do |batch, i|
-            intermediate = File.join(intermediates_dir, "intermediate_#{i}.gz")
+            intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
             lines = batch.flat_map { |f| Zlib::GzipReader.open(f) { |gz| gz.readlines } }
             total_lines += lines.size
             lines.sort!
-            Zlib::GzipWriter.open(intermediate) { |gz| gz.write(lines.join) }
+            File.write(intermediate, lines.join)
             intermediate
           end
         end
