@@ -44,6 +44,8 @@ module FastCov
           total_lines = intermediates.sum { |f| Zlib::GzipReader.open(f) { |gz| gz.count } }
           readers = intermediates.map { |f| Reader.new(f) }
           kway_merge(readers, batch_size, total_lines, &block)
+        ensure
+          readers&.each(&:close)
         end
       end
 
@@ -118,7 +120,6 @@ module FastCov
 
         block.call(batch) if batch && !batch.empty?
 
-        readers.each(&:close)
         emit(:merged, unique_files, elapsed)
       end
     end
