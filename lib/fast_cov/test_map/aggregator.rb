@@ -40,8 +40,7 @@ module FastCov
         return if @fragment_paths.empty?
 
         Dir.mktmpdir("fastcov") do |tmpdir|
-          intermediates = create_intermediates(tmpdir)
-          total_lines = intermediates.sum { |f| Zlib::GzipReader.open(f) { |gz| gz.count } }
+          intermediates, total_lines = create_intermediates(tmpdir)
           readers = intermediates.map { |f| Reader.new(f) }
           kway_merge(readers, batch_size, total_lines, &block)
         ensure
@@ -68,10 +67,12 @@ module FastCov
 
         emit(:sort, @fragment_paths.size, batches.size)
 
+        total_lines = 0
         intermediates, elapsed = measure do
           batches.each_with_index.map do |batch, i|
             intermediate = File.join(intermediates_dir, "intermediate_#{i}.gz")
             lines = batch.flat_map { |f| Zlib::GzipReader.open(f) { |gz| gz.readlines } }
+            total_lines += lines.size
             lines.sort!
             Zlib::GzipWriter.open(intermediate) { |gz| gz.write(lines.join) }
             intermediate
@@ -79,7 +80,7 @@ module FastCov
         end
 
         emit(:sorted, elapsed)
-        intermediates
+        [intermediates, total_lines]
       end
 
       def kway_merge(readers, batch_size, total_lines, &block)
