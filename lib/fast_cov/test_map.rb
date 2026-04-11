@@ -51,8 +51,7 @@ module FastCov
 
     # Write the accumulated mappings as a gzipped TSV fragment.
     def dump(path)
-      dir = File.dirname(path)
-      FileUtils.mkdir_p(dir) unless File.directory?(dir)
+      FileUtils.mkdir_p(File.dirname(path))
 
       Zlib::GzipWriter.open(path) do |gzip|
         @mapping.each do |file, deps|
