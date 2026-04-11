@@ -11,7 +11,7 @@ module FastCov
       attr_reader :file_path, :dependencies
 
       def initialize(path)
-        @io = path.to_s.end_with?(".gz") ? Zlib::GzipReader.open(path) : File.open(path)
+        @io = Zlib::GzipReader.open(path)
         @exhausted = false
         @next_file_path = nil
         @next_dependencies = nil

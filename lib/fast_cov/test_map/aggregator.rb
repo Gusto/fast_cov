@@ -41,7 +41,7 @@ module FastCov
 
         Dir.mktmpdir("fastcov") do |tmpdir|
           intermediates = create_intermediates(tmpdir)
-          total_lines = intermediates.sum { |f| File.foreach(f).count }
+          total_lines = intermediates.sum { |f| Zlib::GzipReader.open(f) { |gz| gz.count } }
           readers = intermediates.map { |f| Reader.new(f) }
           kway_merge(readers, batch_size, total_lines, &block)
         end
@@ -68,10 +68,10 @@ module FastCov
 
         intermediates, elapsed = measure do
           batches.each_with_index.map do |batch, i|
-            intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
+            intermediate = File.join(intermediates_dir, "intermediate_#{i}.gz")
             lines = batch.flat_map { |f| Zlib::GzipReader.open(f) { |gz| gz.readlines } }
             lines.sort!
-            File.write(intermediate, lines.join)
+            Zlib::GzipWriter.open(intermediate) { |gz| gz.write(lines.join) }
             intermediate
           end
         end

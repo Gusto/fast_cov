@@ -9,9 +9,9 @@ RSpec.describe FastCov::TestMap::Reader do
 
   after { FileUtils.rm_rf(tmpdir) }
 
-  describe "reading plain text files" do
+  describe "reading gzipped files" do
     it "parses lines and advances through the file" do
-      path = write_plain(tmpdir, "mapping.txt",
+      path = write_gzip(tmpdir, "mapping.gz",
         "app/models/company.rb\ttest/models/\ttest/requests/",
         "app/models/user.rb\ttest/models/",
         "lib/util.rb\ttest/lib/"
@@ -40,28 +40,9 @@ RSpec.describe FastCov::TestMap::Reader do
     end
   end
 
-  describe "reading gzipped files" do
-    it "reads gzipped content" do
-      path = write_gzip(tmpdir, "mapping.gz",
-        "app/models/user.rb\ttest/models/",
-        "lib/util.rb\ttest/lib/"
-      )
-
-      reader = described_class.new(path)
-
-      expect(reader.file_path).to eq("app/models/user.rb")
-      expect(reader.dependencies).to eq(["test/models/"])
-
-      reader.advance
-      expect(reader.file_path).to eq("lib/util.rb")
-
-      reader.close
-    end
-  end
-
   describe "merging consecutive duplicate entries" do
     it "merges dependencies when the same file appears on consecutive lines" do
-      path = write_plain(tmpdir, "dupes.txt",
+      path = write_gzip(tmpdir, "dupes.gz",
         "app/models/user.rb\ttest/a/\ttest/b/",
         "app/models/user.rb\ttest/c/\ttest/d/",
         "app/models/widget.rb\ttest/e/"
@@ -83,7 +64,7 @@ RSpec.describe FastCov::TestMap::Reader do
     end
 
     it "merges more than two consecutive duplicates" do
-      path = write_plain(tmpdir, "triple.txt",
+      path = write_gzip(tmpdir, "triple.gz",
         "app/models/user.rb\ttest/a/",
         "app/models/user.rb\ttest/b/",
         "app/models/user.rb\ttest/c/",
@@ -99,7 +80,7 @@ RSpec.describe FastCov::TestMap::Reader do
     end
 
     it "merges duplicates at the end of the file" do
-      path = write_plain(tmpdir, "end_dupes.txt",
+      path = write_gzip(tmpdir, "end_dupes.gz",
         "app/models/user.rb\ttest/a/",
         "app/models/widget.rb\ttest/b/",
         "app/models/widget.rb\ttest/c/"
@@ -115,7 +96,7 @@ RSpec.describe FastCov::TestMap::Reader do
     end
 
     it "does not merge non-consecutive entries" do
-      path = write_plain(tmpdir, "non_consecutive.txt",
+      path = write_gzip(tmpdir, "non_consecutive.gz",
         "app/models/user.rb\ttest/a/",
         "app/models/widget.rb\ttest/b/",
         "app/models/user.rb\ttest/c/"
@@ -139,7 +120,8 @@ RSpec.describe FastCov::TestMap::Reader do
 
   describe "edge cases" do
     it "handles empty files" do
-      path = write_plain(tmpdir, "empty.txt")
+      path = File.join(tmpdir, "empty.gz")
+      Zlib::GzipWriter.open(path) { |gz| gz.write("") }
 
       reader = described_class.new(path)
 
@@ -150,7 +132,7 @@ RSpec.describe FastCov::TestMap::Reader do
     end
 
     it "handles lines without dependencies" do
-      path = write_plain(tmpdir, "no_deps.txt", "file.rb")
+      path = write_gzip(tmpdir, "no_deps.gz", "file.rb")
 
       reader = described_class.new(path)
 
@@ -162,12 +144,6 @@ RSpec.describe FastCov::TestMap::Reader do
   end
 
   private
-
-  def write_plain(dir, name, *lines)
-    path = File.join(dir, name)
-    File.write(path, lines.map { |l| "#{l}\n" }.join)
-    path
-  end
 
   def write_gzip(dir, name, *lines)
     path = File.join(dir, name)
