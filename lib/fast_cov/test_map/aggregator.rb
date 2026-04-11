@@ -43,12 +43,7 @@ module FastCov
           intermediates = create_intermediates(tmpdir)
           total_lines = intermediates.sum { |f| File.foreach(f).count }
           readers = intermediates.map { |f| Reader.new(f) }
-
-          if batch_size
-            merge_batched(readers, batch_size, total_lines, &block)
-          else
-            merge_unbatched(readers, total_lines, &block)
-          end
+          kway_merge(readers, batch_size, total_lines, &block)
         end
       end
 
@@ -85,9 +80,10 @@ module FastCov
         intermediates
       end
 
-      def merge_unbatched(readers, total_lines)
+      def kway_merge(readers, batch_size, total_lines, &block)
         unique_files = 0
         processed_lines = 0
+        batch = batch_size ? {} : nil
 
         _, elapsed = measure do
           loop do
@@ -106,49 +102,21 @@ module FastCov
             end
 
             emit(:merge, processed_lines, total_lines)
-            yield min_path, merged.to_a.sort
             unique_files += 1
-          end
-        end
 
-        readers.each(&:close)
-        emit(:merged, unique_files, elapsed)
-      end
-
-      def merge_batched(readers, batch_size, total_lines)
-        unique_files = 0
-        processed_lines = 0
-        batch = {}
-
-        _, elapsed = measure do
-          loop do
-            active = readers.reject(&:exhausted?)
-            break if active.empty?
-
-            min_path = active.map(&:file_path).min
-
-            merged = Set.new
-            active.each do |reader|
-              if reader.file_path == min_path
-                processed_lines += 1
-                merged.merge(reader.dependencies)
-                reader.advance
+            if batch
+              batch[min_path] = merged.to_a.sort
+              if batch.size >= batch_size
+                block.call(batch)
+                batch = {}
               end
-            end
-
-            emit(:merge, processed_lines, total_lines)
-
-            batch[min_path] = merged.to_a.sort
-            unique_files += 1
-
-            if batch.size >= batch_size
-              yield batch
-              batch = {}
+            else
+              block.call(min_path, merged.to_a.sort)
             end
           end
         end
 
-        yield batch unless batch.empty?
+        block.call(batch) if batch && !batch.empty?
 
         readers.each(&:close)
         emit(:merged, unique_files, elapsed)
