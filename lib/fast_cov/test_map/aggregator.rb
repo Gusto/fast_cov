@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "benchmark"
 require "tmpdir"
 require "zlib"
 
@@ -59,15 +58,21 @@ module FastCov
         @hooks[event]&.call(*args)
       end
 
+      def measure
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        result = yield
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+        [result, elapsed]
+      end
+
       def create_intermediates(intermediates_dir)
         batch_size = (@fragment_paths.size.to_f / @max_readers).ceil
         batches = @fragment_paths.each_slice(batch_size).to_a
 
         emit(:sort, @fragment_paths.size, batches.size)
 
-        intermediates = nil
-        elapsed = Benchmark.realtime do
-          intermediates = batches.each_with_index.map do |batch, i|
+        intermediates, elapsed = measure do
+          batches.each_with_index.map do |batch, i|
             intermediate = File.join(intermediates_dir, "intermediate_#{i}.txt")
             lines = batch.flat_map { |f| Zlib::GzipReader.open(f) { |gz| gz.readlines } }
             lines.sort!
@@ -84,7 +89,7 @@ module FastCov
         unique_files = 0
         processed_lines = 0
 
-        elapsed = Benchmark.realtime do
+        _, elapsed = measure do
           loop do
             active = readers.reject(&:exhausted?)
             break if active.empty?
@@ -115,7 +120,7 @@ module FastCov
         processed_lines = 0
         batch = {}
 
-        elapsed = Benchmark.realtime do
+        _, elapsed = measure do
           loop do
             active = readers.reject(&:exhausted?)
             break if active.empty?
