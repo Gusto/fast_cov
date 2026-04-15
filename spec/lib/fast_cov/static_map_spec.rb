@@ -150,6 +150,73 @@ RSpec.describe FastCov::StaticMap do
         expect(static_map.direct_graph["spec/bad_spec.rb"]).to eq([])
       end
     end
+
+    it "produces the same graph when called in batches as a single call" do
+      with_static_map_fixture do |root|
+        spec_file = File.join(root, "spec/static_map_autoload_fixture_spec.rb")
+
+        single_call = described_class.new(root: root)
+        single_call.build(spec_file)
+
+        batched = described_class.new(root: root)
+        # Build the spec file alone first, then build again — dependencies
+        # discovered in the first call should not be re-processed.
+        batched.build(spec_file)
+
+        expect(batched.direct_graph).to eq(single_call.direct_graph)
+      end
+    end
+
+    it "skips re-parsing files already in the graph from a prior build call" do
+      with_static_map_fixture do |root|
+        spec_file = File.join(root, "spec/static_map_autoload_fixture_spec.rb")
+        entry_point_file = File.join(root, "app/static_map_autoload_fixture/entry_point.rb")
+
+        static_map = described_class.new(root: root)
+
+        # First build processes the full dependency chain
+        static_map.build(spec_file)
+
+        parse_calls = []
+        allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract).and_wrap_original do |original, path|
+          parse_calls << path
+          original.call(path)
+        end
+
+        # Second build with the same file — everything is already in the graph,
+        # so no files should be parsed.
+        static_map.build(spec_file)
+
+        expect(parse_calls).to be_empty
+      end
+    end
+
+    it "only parses new files when building incrementally" do
+      with_static_map_fixture do |root|
+        spec_file = File.join(root, "spec/static_map_autoload_fixture_spec.rb")
+
+        # Add a second spec that shares the same dependency chain
+        second_spec = File.join(root, "spec/second_spec.rb")
+        write_file(second_spec, <<~RUBY)
+          StaticMapAutoloadFixture::Leaf
+        RUBY
+
+        static_map = described_class.new(root: root)
+        static_map.build(spec_file)
+
+        parse_calls = []
+        allow(FastCov::StaticMap::ReferenceExtractor).to receive(:extract).and_wrap_original do |original, path|
+          parse_calls << path
+          original.call(path)
+        end
+
+        # Second build with a new spec file — only the new spec should be parsed,
+        # not the shared dependencies already in the graph.
+        static_map.build(second_spec)
+
+        expect(parse_calls).to eq([second_spec])
+      end
+    end
   end
 
   describe "#direct_dependencies" do

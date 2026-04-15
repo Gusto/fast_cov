@@ -23,7 +23,7 @@ module FastCov
       processed = {}
 
       until queue.empty?
-        to_process = queue.reject { |f| processed[f] }
+        to_process = queue.reject { |f| processed[f] || @graph.key?(relativize(f)) }
         break if to_process.empty?
 
         to_process.each { |f| processed[f] = true }
@@ -42,7 +42,7 @@ module FastCov
           @graph[relative_file] = deps.empty? ? EMPTY_ARRAY : deps.map { |d| relativize(d) }.freeze
 
           deps.each do |dep|
-            queue << dep unless processed[dep]
+            queue << dep unless processed[dep] || @graph.key?(relativize(dep))
           end
         end
       end
