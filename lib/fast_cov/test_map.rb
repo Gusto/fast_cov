@@ -50,11 +50,6 @@ module FastCov
     end
 
     # Write the accumulated mappings as a gzipped TSV fragment.
-    #
-    # Streams one line at a time to keep peak memory bounded — the prior
-    # `lines = @mapping.map { … }; gz.write(lines.join)` pattern materialized
-    # the full output twice (as an Array of lines, then a joined mega-string)
-    # and caused RSS to balloon by GB on large mappings.
     def dump(path)
       FileUtils.mkdir_p(File.dirname(path))
 
