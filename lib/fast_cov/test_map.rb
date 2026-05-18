@@ -53,8 +53,11 @@ module FastCov
     def dump(path)
       FileUtils.mkdir_p(File.dirname(path))
 
-      lines = @mapping.map { |file, deps| "#{file}\t#{deps.to_a.join("\t")}\n" }
-      Zlib::GzipWriter.open(path) { |gz| gz.write(lines.join) }
+      Zlib::GzipWriter.open(path) do |gz|
+        @mapping.each do |file, deps|
+          gz.write("#{file}\t#{deps.to_a.join("\t")}\n")
+        end
+      end
     end
 
     # Number of unique source files mapped.
