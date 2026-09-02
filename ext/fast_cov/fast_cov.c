@@ -17,6 +17,13 @@
 static VALUE fast_cov_stop(VALUE self);
 static VALUE fast_cov_yield_block(VALUE _arg);
 
+// Seen-set sizing. Power-of-two capacities so lookups mask instead of modulo.
+#define SEEN_INITIAL_CAPACITY 256
+// Grow at 3/4 load. Linear probing degrades sharply past that, and a full
+// table would make the insert probe loop spin forever.
+#define SEEN_LOAD_NUMERATOR 3
+#define SEEN_LOAD_DENOMINATOR 4
+
 // ---- Data structure -----------------------------------------------------
 
 struct fast_cov_data {
@@ -29,7 +36,19 @@ struct fast_cov_data {
   long *ignored_path_lens;
   long ignored_paths_count;
 
+  // Two-level cache over source file identity, both keyed on the pointer
+  // rb_sourcefile() returns (stable per file, so comparing it is one
+  // integer compare instead of a string compare):
+  //
+  //   last_filename_ptr - single slot, hits while execution stays in one file
+  //   seen_*            - open-addressed set of every file seen this session,
+  //                       so alternating between files stays on the fast path
   uintptr_t last_filename_ptr;
+
+  uintptr_t *seen_ptrs;
+  VALUE *seen_paths;
+  long seen_capacity;
+  long seen_count;
 
   bool threads;
   bool started;
@@ -44,8 +63,18 @@ struct fast_cov_data {
 
 static void fast_cov_mark(void *ptr) {
   struct fast_cov_data *data = ptr;
+  long i;
+
   rb_gc_mark(data->impacted_files);
   rb_gc_mark(data->th_covered);
+
+  // Pinning the path strings is what makes the pointer cache sound: it keeps
+  // each rb_sourcefile() pointer alive and at a fixed address for the whole
+  // session. Without it a freed string's address could be reused by another
+  // file, which would read as a cache hit and silently drop that file.
+  for (i = 0; i < data->seen_capacity; i++) {
+    if (data->seen_ptrs[i]) rb_gc_mark(data->seen_paths[i]);
+  }
 }
 
 static void fast_cov_free(void *ptr) {
@@ -59,6 +88,8 @@ static void fast_cov_free(void *ptr) {
     xfree(data->ignored_paths);
   }
   if (data->ignored_path_lens) xfree(data->ignored_path_lens);
+  if (data->seen_ptrs) xfree(data->seen_ptrs);
+  if (data->seen_paths) xfree(data->seen_paths);
   xfree(data);
 }
 
@@ -92,7 +123,102 @@ static VALUE fast_cov_allocate(VALUE klass) {
   data->threads = true;
   data->started = false;
 
+  // Keep seen_capacity at 0 until both arrays are installed: xcalloc can
+  // trigger GC, and fast_cov_mark walks seen_capacity entries.
+  data->seen_capacity = 0;
+  data->seen_count = 0;
+  data->seen_ptrs = NULL;
+  data->seen_paths = NULL;
+
+  uintptr_t *seen_ptrs = xcalloc(SEEN_INITIAL_CAPACITY, sizeof(uintptr_t));
+  VALUE *seen_paths = xcalloc(SEEN_INITIAL_CAPACITY, sizeof(VALUE));
+  data->seen_ptrs = seen_ptrs;
+  data->seen_paths = seen_paths;
+  data->seen_capacity = SEEN_INITIAL_CAPACITY;
+
   return obj;
+}
+
+// ---- Seen-set -----------------------------------------------------------
+//
+// Open-addressed set of the rb_sourcefile() pointers seen this session, with
+// the corresponding path string stored alongside so it can be pinned. Linear
+// probing keeps lookups in one cache line for the common case.
+
+// The low bits of a pointer carry little entropy (allocations are aligned),
+// so shift them off before masking.
+static inline long seen_slot(uintptr_t filename_ptr, long capacity) {
+  return (long)((filename_ptr >> 3) & (uintptr_t)(capacity - 1));
+}
+
+static inline bool seen_include(const struct fast_cov_data *data,
+                                uintptr_t filename_ptr) {
+  long slot = seen_slot(filename_ptr, data->seen_capacity);
+
+  while (data->seen_ptrs[slot]) {
+    if (data->seen_ptrs[slot] == filename_ptr) return true;
+    slot = (slot + 1) & (data->seen_capacity - 1);
+  }
+
+  return false;
+}
+
+static void seen_grow(struct fast_cov_data *data) {
+  uintptr_t *old_ptrs = data->seen_ptrs;
+  VALUE *old_paths = data->seen_paths;
+  long old_capacity = data->seen_capacity;
+  long new_capacity = old_capacity * 2;
+  long i;
+
+  // Allocate both arrays before installing either. GC can run inside xcalloc,
+  // and fast_cov_mark must keep seeing a consistent capacity/arrays triple.
+  uintptr_t *new_ptrs = xcalloc(new_capacity, sizeof(uintptr_t));
+  VALUE *new_paths = xcalloc(new_capacity, sizeof(VALUE));
+
+  for (i = 0; i < old_capacity; i++) {
+    uintptr_t filename_ptr = old_ptrs[i];
+    if (!filename_ptr) continue;
+
+    long slot = seen_slot(filename_ptr, new_capacity);
+    while (new_ptrs[slot]) {
+      slot = (slot + 1) & (new_capacity - 1);
+    }
+    new_ptrs[slot] = filename_ptr;
+    new_paths[slot] = old_paths[i];
+  }
+
+  // Install, then free: the struct must never point at freed arrays, since a
+  // GC between the two would mark through them.
+  data->seen_ptrs = new_ptrs;
+  data->seen_paths = new_paths;
+  data->seen_capacity = new_capacity;
+
+  xfree(old_ptrs);
+  xfree(old_paths);
+}
+
+static void seen_add(struct fast_cov_data *data, uintptr_t filename_ptr,
+                     VALUE path) {
+  if (data->seen_count + 1 >
+      data->seen_capacity * SEEN_LOAD_NUMERATOR / SEEN_LOAD_DENOMINATOR) {
+    seen_grow(data);
+  }
+
+  long slot = seen_slot(filename_ptr, data->seen_capacity);
+  while (data->seen_ptrs[slot]) {
+    if (data->seen_ptrs[slot] == filename_ptr) return;
+    slot = (slot + 1) & (data->seen_capacity - 1);
+  }
+
+  data->seen_ptrs[slot] = filename_ptr;
+  data->seen_paths[slot] = path;
+  data->seen_count++;
+}
+
+static void seen_clear(struct fast_cov_data *data) {
+  MEMZERO(data->seen_ptrs, uintptr_t, data->seen_capacity);
+  MEMZERO(data->seen_paths, VALUE, data->seen_capacity);
+  data->seen_count = 0;
 }
 
 // ---- Internal helpers ---------------------------------------------------
@@ -127,6 +253,13 @@ static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
   }
   data->last_filename_ptr = current_filename_ptr;
 
+  // Execution alternates between files constantly (a method in one file
+  // calling into another), so the single slot above misses often. Anything
+  // already seen this session is resolved here without touching the VM.
+  if (seen_include(data, current_filename_ptr)) {
+    return;
+  }
+
   VALUE top_frame;
   if (rb_profile_frames(0, 1, &top_frame, NULL) != 1) {
     return;
@@ -137,6 +270,9 @@ static void on_line_event(rb_event_flag_t event, VALUE self_data, VALUE self,
     return;
   }
 
+  // Only cache pointers we hold a path string for — the pin in fast_cov_mark
+  // is what keeps the pointer valid and unambiguous.
+  seen_add(data, current_filename_ptr, filename);
   record_impacted_file(data, filename);
 }
 
@@ -275,6 +411,7 @@ static VALUE fast_cov_stop(VALUE self) {
 
   data->impacted_files = rb_hash_new();
   data->last_filename_ptr = 0;
+  seen_clear(data);
   data->started = false;
 
   return res;
