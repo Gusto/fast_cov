@@ -224,9 +224,10 @@ static void seen_clear(struct fast_cov_data *data) {
 // ---- Internal helpers ---------------------------------------------------
 
 static bool record_impacted_file(struct fast_cov_data *data, VALUE filename) {
-  if (!fast_cov_is_path_included(RSTRING_PTR(filename), data->root,
-                                 data->root_len, data->ignored_paths,
-                                 data->ignored_path_lens,
+  // RSTRING_LEN is O(1); passing it avoids re-scanning the path with strlen.
+  if (!fast_cov_is_path_included(RSTRING_PTR(filename), RSTRING_LEN(filename),
+                                 data->root, data->root_len,
+                                 data->ignored_paths, data->ignored_path_lens,
                                  data->ignored_paths_count)) {
     return false;
   }
