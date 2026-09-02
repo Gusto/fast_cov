@@ -48,6 +48,20 @@ module FastCov
           cov.stop
         end
 
+        # Every call crosses calculator.rb -> operations/*.rb and back, so this
+        # measures the per-line-event cost of file transitions rather than the
+        # start/stop overhead that dominates the scenarios above.
+        runner.scenario("Line coverage (cross-file transitions)") do
+          cov = FastCov::Coverage.new(root: root_calculator)
+          cov.start
+          200.times do
+            calculator.add(1, 2)
+            calculator.subtract(3, 1)
+            calculator.multiply(2, 3)
+          end
+          cov.stop
+        end
+
         runner.scenario("Rapid start/stop (100x)") do
           cov = FastCov::Coverage.new(root: root_calculator)
           100.times do

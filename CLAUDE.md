@@ -61,6 +61,13 @@ The C extension defines `FastCov::Coverage` (a Ruby class) and `FastCov::Cache` 
 
 **1. Line coverage** — The core feature. Hooks `RUBY_EVENT_LINE` which fires every time the Ruby VM executes a new line. The callback (`on_line_event`) records the source file path. It uses a pointer-caching optimization: `rb_sourcefile()` returns a `const char*` whose address doesn't change for the same file, so we compare pointers (a single integer comparison) instead of strings to skip files we've already seen.
 
+The cache has two levels, because execution alternates between files constantly (a method in one file calling into another) and a single-slot cache misses on every transition:
+
+1. `last_filename_ptr` — one slot, hits while execution stays in one file.
+2. The seen-set (`seen_ptrs`/`seen_paths`) — an open-addressed set of every file pointer seen this session. Starts at 256 entries and doubles at 3/4 load. A hit here returns without calling into the VM at all.
+
+Only pointers we hold the path string for get cached, and those strings are pinned in `fast_cov_mark`. That pin is load-bearing: it keeps each pointer alive and at a fixed address for the session. Without it, a freed string's address could be reused by another file, which would read as a cache hit and silently drop that file from the results.
+
 **2. Allocation tracing** — Optional. Hooks `RUBY_INTERNAL_EVENT_NEWOBJ` which fires on every object allocation. We only care about `T_OBJECT` and `T_STRUCT` types (regular classes and structs). During `stop`, we iterate every class that was instantiated, walk its full ancestor chain (`rb_mod_ancestors`), and resolve each ancestor to its source file via `Object.const_source_location`. This catches classes that have no executable methods (empty models, structs, Data objects).
 
 ### In-memory cache
@@ -90,6 +97,7 @@ The benchmarks in `lib/fast_cov/benchmark/scenarios.rb` measure distinct aspects
 | Line coverage (many files) | Same but exercising all fixture files (calculator, models, structs, dynamic dispatch) |
 | Line coverage (single-threaded) | Per-thread hook mode (`threads: false`) vs global hook |
 | Line coverage (with ignored_path) | Overhead of ignored_path filtering in the hot path |
+| Line coverage (cross-file transitions) | Per-line-event cost when execution bounces between files (exercises the seen-set) |
 | Allocation tracing | Overhead of NEWOBJ hooks + ancestor chain resolution at stop time |
 | Rapid start/stop (100x) | Hook install/remove overhead across many cycles |
 | Multi-threaded coverage | Thread creation + global hook overhead |

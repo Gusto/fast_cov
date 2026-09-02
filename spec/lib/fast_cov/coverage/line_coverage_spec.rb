@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "tmpdir"
+
 RSpec.describe FastCov::Coverage, "line coverage" do
   include_context "coverage instance"
   let(:root) { fixtures_path("calculator/operations") }
@@ -166,6 +168,72 @@ RSpec.describe FastCov::Coverage, "line coverage" do
 
       expect(result).to include(fixtures_path("calculator/operations/multiply.rb"))
       expect(result).not_to include(fixtures_path("calculator/operations/add.rb"))
+    end
+  end
+
+  describe "file identity caching" do
+    # The internal seen-set starts at 256 entries and doubles as needed.
+    # These specs cover the paths that only appear at scale or when execution
+    # bounces between files.
+    let(:file_count) { 1_500 }
+
+    around do |example|
+      Dir.mktmpdir("fast_cov_many_files") do |dir|
+        @tmpdir = dir
+        example.run
+      end
+    end
+
+    # Method definitions rather than constants: these files get required by
+    # more than one example, and redefining a constant warns.
+    def write_files(dir, count)
+      Array.new(count) do |i|
+        path = File.join(dir, "many_files_#{i}.rb")
+        File.write(path, "def many_files_#{i}\n  #{i}\nend\n")
+        path
+      end
+    end
+
+    it "records every file when a session touches more files than the cache holds" do
+      paths = write_files(@tmpdir, file_count)
+      coverage = described_class.new(root: @tmpdir)
+
+      coverage.start
+      paths.each { |path| require path }
+      result = coverage.stop
+
+      expect(result.keys).to match_array(paths)
+    end
+
+    it "clears the cache between sessions after it has grown" do
+      paths = write_files(@tmpdir, file_count)
+      coverage = described_class.new(root: @tmpdir)
+
+      coverage.start
+      paths.each { |path| require path }
+      coverage.stop
+
+      coverage.start
+      second_result = coverage.stop
+
+      expect(second_result).to be_empty
+    end
+
+    it "records both files when execution alternates between them" do
+      root = fixtures_path("calculator")
+      coverage = described_class.new(root: root)
+
+      coverage.start
+      5.times do
+        calculator.add(1, 2)
+        calculator.subtract(3, 1)
+      end
+      result = coverage.stop
+
+      expect(result).to include(
+        fixtures_path("calculator/operations/add.rb"),
+        fixtures_path("calculator/operations/subtract.rb")
+      )
     end
   end
 end
