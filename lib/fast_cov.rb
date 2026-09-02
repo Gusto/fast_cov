@@ -2,12 +2,8 @@
 
 require "rbconfig"
 
-# Tagged with the ABI version ("3.4.0"), not RUBY_VERSION ("3.4.9"). RubyGems
-# keys installed extensions by ABI too, so it will not rebuild the gem when
-# only the patch level changes -- tagging by patch level meant a Ruby upgrade
-# inside the same ABI left this require looking for a file that was never
-# built. Distinct ABIs still get distinct files, which is what matters for
-# keeping multiple Ruby versions side by side in development.
+# ABI version ("3.4.0"), not RUBY_VERSION ("3.4.9"): RubyGems keys installed
+# extensions by ABI, so it will not rebuild the gem on a patch-level upgrade.
 require "fast_cov/fast_cov.#{RbConfig::CONFIG["ruby_version"]}"
 
 module FastCov

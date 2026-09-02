@@ -21,10 +21,8 @@ module FastCov
       end
     end
 
-    # These patches stay installed for the life of the process, so each one
-    # checks whether the tracker is recording before doing any work. Paths are
-    # handed over raw: AbstractTracker#record normalizes them, and expanding
-    # here as well meant every read paid for two File.expand_path calls.
+    # The patches are permanent, so each checks active before doing any work.
+    # Paths go over raw because AbstractTracker#record normalizes them.
     module FilePatch
       def read(name, *args, **kwargs, &block)
         super.tap do

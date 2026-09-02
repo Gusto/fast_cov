@@ -2,9 +2,8 @@
 
 require "yaml"
 
-# The tracker patches stay installed for the life of the process, so anything
-# expensive has to sit behind the active check. These specs assert the work is
-# skipped while no session is running, rather than computed and discarded.
+# The tracker patches are permanent, so anything expensive has to sit behind
+# the active check.
 RSpec.describe "tracker cost while inactive" do
   let(:coverage_map) do
     FastCov::CoverageMap.new.tap do |coverage|

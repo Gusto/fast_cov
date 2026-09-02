@@ -113,10 +113,8 @@ module FastCov
 
     private
 
-    # Reused across start/stop cycles. Callers run one cycle per test, and a
-    # Coverage instance rebuilds its internal caches from scratch each time it
-    # is created, so allocating a fresh one per test threw that work away.
-    # Rebuilt only when the configuration it was created from changes.
+    # Reused across cycles: a Coverage instance rebuilds its file cache from
+    # scratch on construction, so a fresh one per cycle discards that work.
     def native_coverage
       config = [normalized_root, normalized_ignored_paths, @threads != false]
       return @native_coverage if @native_coverage && @native_coverage_config == config
@@ -157,11 +155,8 @@ module FastCov
       File.absolute_path?(path)
     end
 
-    # Relative paths resolve against root, not the process working directory.
-    # #stop hands back root-relative paths, and callers feed those straight
-    # back into #connect (FixtureKitTracker does exactly this), so anchoring
-    # on Dir.pwd silently dropped every such edge unless root happened to
-    # equal the working directory.
+    # Against root, not Dir.pwd: #stop returns root-relative paths and callers
+    # pass them straight back into #connect.
     def normalize_path(path)
       return if path.nil?
 

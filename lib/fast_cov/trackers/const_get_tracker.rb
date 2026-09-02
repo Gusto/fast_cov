@@ -25,10 +25,8 @@ module FastCov
       def const_get(name, inherit = true)
         result = super
 
-        # The patch stays installed for the life of the process, so the active
-        # check has to come before const_source_location rather than inside
-        # .record — otherwise every const_get in the process pays for a lookup
-        # whose result gets thrown away.
+        # The patch is permanent, so the active check has to precede the
+        # lookup — otherwise every const_get in the process pays for it.
         if FastCov::ConstGetTracker.active
           FastCov::ConstGetTracker.record(const_source_location(name, inherit)&.first)
         end

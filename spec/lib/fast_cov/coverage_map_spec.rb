@@ -122,8 +122,6 @@ RSpec.describe FastCov::CoverageMap do
       coverage = described_class.new
       coverage.root = fixtures_path("calculator")
 
-      # #stop hands back root-relative paths, and callers feed them straight
-      # back into #connect.
       coverage.connect(from: "calculator.rb", to: "operations/add.rb")
 
       paths = Set.new([fixtures_path("calculator/calculator.rb")])
