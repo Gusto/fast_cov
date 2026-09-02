@@ -265,10 +265,15 @@ static VALUE fast_cov_stop(VALUE self) {
     if (thval != data->th_covered) {
       rb_raise(rb_eRuntimeError, "Coverage was not started by this thread");
     }
-    rb_thread_remove_event_hook(data->th_covered, on_line_event);
+    // Match on the registering object, not just the callback. The plain
+    // rb_*_remove_event_hook variants match by function pointer alone, so
+    // stopping one Coverage instance would tear down the hooks belonging to
+    // every other live instance — silently, since those instances stay
+    // `started` and simply stop recording.
+    rb_thread_remove_event_hook_with_data(data->th_covered, on_line_event, self);
     data->th_covered = Qnil;
   } else {
-    rb_remove_event_hook(on_line_event);
+    rb_remove_event_hook_with_data(on_line_event, self);
   }
 
   VALUE res = data->impacted_files;
