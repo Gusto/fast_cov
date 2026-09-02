@@ -9,9 +9,9 @@
 bool fast_cov_is_within_root(const char *path, long path_len,
                              const char *root, long root_len);
 
-bool fast_cov_is_path_included(const char *path, const char *root_path,
-                               long root_path_len, char **ignored_paths,
-                               long *ignored_path_lens,
+bool fast_cov_is_path_included(const char *path, long path_len,
+                               const char *root_path, long root_path_len,
+                               char **ignored_paths, long *ignored_path_lens,
                                long ignored_paths_count);
 
 /* ---- Utility functions -------------------------------------------------- */

@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
-require "fast_cov/fast_cov.#{RUBY_VERSION}"
+require "rbconfig"
+
+# ABI version ("3.4.0"), not RUBY_VERSION ("3.4.9"): RubyGems keys installed
+# extensions by ABI, so it will not rebuild the gem on a patch-level upgrade.
+require "fast_cov/fast_cov.#{RbConfig::CONFIG["ruby_version"]}"
 
 module FastCov
   autoload :Utils, File.expand_path("fast_cov/utils", __dir__)

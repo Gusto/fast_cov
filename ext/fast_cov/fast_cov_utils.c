@@ -18,8 +18,9 @@ bool fast_cov_is_within_root(const char *path, long path_len,
     return false;
   }
 
-  // Check prefix match
-  if (strncmp(path, root, effective_root_len) != 0) {
+  // Check prefix match. memcmp rather than strncmp: both lengths are known,
+  // so there is no reason to also scan for a terminator.
+  if (memcmp(path, root, (size_t)effective_root_len) != 0) {
     return false;
   }
 
@@ -33,11 +34,10 @@ bool fast_cov_is_within_root(const char *path, long path_len,
   return path[effective_root_len] == '/';
 }
 
-bool fast_cov_is_path_included(const char *path, const char *root_path,
-                               long root_path_len, char **ignored_paths,
-                               long *ignored_path_lens,
+bool fast_cov_is_path_included(const char *path, long path_len,
+                               const char *root_path, long root_path_len,
+                               char **ignored_paths, long *ignored_path_lens,
                                long ignored_paths_count) {
-  long path_len = (long)strlen(path);
   long i;
 
   if (!fast_cov_is_within_root(path, path_len, root_path, root_path_len)) {
