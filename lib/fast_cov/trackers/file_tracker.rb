@@ -21,19 +21,25 @@ module FastCov
       end
     end
 
+    # These patches stay installed for the life of the process, so each one
+    # checks whether the tracker is recording before doing any work. Paths are
+    # handed over raw: AbstractTracker#record normalizes them, and expanding
+    # here as well meant every read paid for two File.expand_path calls.
     module FilePatch
       def read(name, *args, **kwargs, &block)
         super.tap do
-          FastCov::FileTracker.record(File.expand_path(name))
+          FastCov::FileTracker.record(name) if FastCov::FileTracker.active
         end
       end
 
       def open(name, *args, **kwargs, &block)
-        mode = args[0]
-        is_read = mode.nil? || (mode.is_a?(String) && mode.start_with?("r")) ||
-                  (mode.is_a?(Integer) && (mode & (File::WRONLY | File::RDWR)).zero?)
         super.tap do
-          FastCov::FileTracker.record(File.expand_path(name)) if is_read
+          next unless FastCov::FileTracker.active
+
+          mode = args[0]
+          is_read = mode.nil? || (mode.is_a?(String) && mode.start_with?("r")) ||
+                    (mode.is_a?(Integer) && (mode & (File::WRONLY | File::RDWR)).zero?)
+          FastCov::FileTracker.record(name) if is_read
         end
       end
     end
@@ -41,19 +47,19 @@ module FastCov
     module YamlPatch
       def load_file(path, *args, **kwargs)
         super.tap do
-          FastCov::FileTracker.record(File.expand_path(path))
+          FastCov::FileTracker.record(path) if FastCov::FileTracker.active
         end
       end
 
       def safe_load_file(path, *args, **kwargs)
         super.tap do
-          FastCov::FileTracker.record(File.expand_path(path))
+          FastCov::FileTracker.record(path) if FastCov::FileTracker.active
         end
       end
 
       def unsafe_load_file(path, *args, **kwargs)
         super.tap do
-          FastCov::FileTracker.record(File.expand_path(path))
+          FastCov::FileTracker.record(path) if FastCov::FileTracker.active
         end
       end
     end

@@ -41,6 +41,8 @@ module FastCov
         # When a test mounts a fixture, record the fixture definition file
         # and any parent fixture files in the chain.
         config.on_cache_mount do |event|
+          next unless tracker.class.active
+
           tracker.class.record(event.path)
           parent = event.fixture.parent
           while parent
