@@ -41,8 +41,11 @@ module FastCov
       stored != source_digest
     end
 
+    # Matches the ABI-version tag used by extconf.rb and lib/fast_cov.rb.
+    ABI_VERSION = RbConfig::CONFIG["ruby_version"]
+
     def self.extension_exists?
-      Dir.glob(File.join(FAST_COV_DIR, "fast_cov.#{RUBY_VERSION}.{bundle,so}")).any?
+      Dir.glob(File.join(FAST_COV_DIR, "fast_cov.#{ABI_VERSION}.{bundle,so}")).any?
     end
 
     def self.source_digest
@@ -52,8 +55,8 @@ module FastCov
     end
 
     def self.digest_path
-      # Keep version-specific so we recompile when switching Ruby versions
-      File.join(FAST_COV_DIR, ".source_digest.#{RUBY_VERSION}")
+      # Keep ABI-specific so we recompile when switching Ruby versions
+      File.join(FAST_COV_DIR, ".source_digest.#{ABI_VERSION}")
     end
 
     def self.write_digest

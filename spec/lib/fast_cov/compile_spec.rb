@@ -6,8 +6,8 @@ require "fileutils"
 RSpec.describe "fast_cov/dev entrypoint" do
   let(:project_root) { File.expand_path("../../..", __dir__) }
   let(:lib_dir) { File.join(project_root, "lib", "fast_cov") }
-  let(:bundle_glob) { File.join(lib_dir, "fast_cov.#{RUBY_VERSION}.{bundle,so}") }
-  let(:digest_file) { File.join(lib_dir, ".source_digest.#{RUBY_VERSION}") }
+  let(:bundle_glob) { File.join(lib_dir, "fast_cov.#{RbConfig::CONFIG["ruby_version"]}.{bundle,so}") }
+  let(:digest_file) { File.join(lib_dir, ".source_digest.#{RbConfig::CONFIG["ruby_version"]}") }
 
   def run_ruby(code)
     stdout, stderr, status = Open3.capture3(

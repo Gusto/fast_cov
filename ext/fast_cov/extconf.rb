@@ -8,5 +8,6 @@ end
 
 require "mkmf"
 
-# Version-tagged so multiple Ruby versions can coexist in development
-create_makefile("fast_cov/fast_cov.#{RUBY_VERSION}")
+# Tagged with the ABI version so multiple Ruby versions can coexist in
+# development. Must stay in sync with the require in lib/fast_cov.rb.
+create_makefile("fast_cov/fast_cov.#{RbConfig::CONFIG["ruby_version"]}")
