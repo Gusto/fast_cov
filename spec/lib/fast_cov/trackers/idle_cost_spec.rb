@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "yaml"
-
 # The tracker patches are permanent, so anything expensive has to sit behind
 # the active check.
 RSpec.describe "tracker cost while inactive" do
@@ -16,59 +14,83 @@ RSpec.describe "tracker cost while inactive" do
   before { coverage_map }
 
   describe "ConstGetTracker" do
-    it "does not resolve constant source locations while inactive" do
-      allow(Object).to receive(:const_source_location).and_call_original
+    # ConstGetPatch resolves the constant's source location on the receiving
+    # module, so a module that counts those calls reports whether the lookup
+    # happened without stubbing anything.
+    let(:namespace) do
+      Module.new do
+        const_set(:Thing, Class.new)
 
-      Object.const_get("Calculator")
+        class << self
+          attr_reader :source_lookups
 
-      expect(Object).not_to have_received(:const_source_location)
+          def const_source_location(...)
+            @source_lookups = source_lookups.to_i + 1
+            super
+          end
+        end
+      end
     end
 
-    it "resolves them while active" do
+    it "does not resolve the constant's source location while inactive" do
+      namespace.const_get(:Thing)
+
+      expect(namespace.source_lookups).to be_nil
+    end
+
+    it "resolves it while active" do
       coverage_map.start
-      allow(Object).to receive(:const_source_location).and_call_original
+      namespace.const_get(:Thing)
 
-      Object.const_get("Calculator")
-
-      expect(Object).to have_received(:const_source_location)
+      expect(namespace.source_lookups).to eq(1)
     ensure
       coverage_map.stop
+    end
+
+    it "still returns the constant either way" do
+      expect(namespace.const_get(:Thing)).to be(namespace::Thing)
     end
   end
 
   describe "FileTracker" do
-    let(:path) { fixtures_path("calculator", "config.yml") }
+    # File.read converts its argument via #to_path exactly once. Recording adds
+    # a #to_s when the path is normalized, so the conversion count shows
+    # whether the tracker touched the path at all.
+    let(:path) do
+      Class.new do
+        attr_reader :conversions
 
-    it "does not expand paths while inactive" do
-      allow(File).to receive(:expand_path).and_call_original
+        def initialize(path)
+          @path = path
+          @conversions = 0
+        end
 
+        def to_path
+          @conversions += 1
+          @path
+        end
+        alias_method :to_s, :to_path
+      end.new(fixtures_path("calculator", "config.yml"))
+    end
+
+    it "does not convert the path beyond File.read's own lookup while inactive" do
       File.read(path)
 
-      expect(File).not_to have_received(:expand_path)
+      expect(path.conversions).to eq(1)
     end
 
-    it "does not expand paths for YAML loads while inactive" do
-      allow(File).to receive(:expand_path).and_call_original
-
-      YAML.unsafe_load_file(path)
-
-      expect(File).not_to have_received(:expand_path)
-    end
-
-    it "expands them while active" do
+    it "converts it again to normalize while active" do
       coverage_map.start
-      allow(File).to receive(:expand_path).and_call_original
-
       File.read(path)
 
-      expect(File).to have_received(:expand_path).with(path)
+      expect(path.conversions).to eq(2)
     ensure
       coverage_map.stop
     end
   end
 
   describe "recording still works end to end" do
-    it "records both file reads and dynamic constant lookups" do
+    it "records file reads and dynamic constant lookups" do
       result = coverage_map.build do
         File.read(fixtures_path("calculator", "config.yml"))
         Object.const_get("Calculator")
