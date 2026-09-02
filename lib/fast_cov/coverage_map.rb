@@ -16,6 +16,7 @@ module FastCov
       @connected_dependencies = ConnectedDependencies.new
       @trackers = []
       @native_coverage = nil
+      @native_coverage_config = nil
       @started = false
     end
 
@@ -69,11 +70,7 @@ module FastCov
       return self if @started
 
       begin
-        @native_coverage = Coverage.new(
-          root: normalized_root,
-          ignored_paths: normalized_ignored_paths,
-          threads: @threads != false
-        )
+        @native_coverage = native_coverage
         @native_coverage.start
         @trackers.each(&:start)
         @started = true
@@ -93,7 +90,6 @@ module FastCov
       @connected_dependencies.expand(result)
       Utils.relativize_paths(result, normalized_root)
     ensure
-      @native_coverage = nil
       @started = false
     end
 
@@ -116,6 +112,22 @@ module FastCov
     end
 
     private
+
+    # Reused across start/stop cycles. Callers run one cycle per test, and a
+    # Coverage instance rebuilds its internal caches from scratch each time it
+    # is created, so allocating a fresh one per test threw that work away.
+    # Rebuilt only when the configuration it was created from changes.
+    def native_coverage
+      config = [normalized_root, normalized_ignored_paths, @threads != false]
+      return @native_coverage if @native_coverage && @native_coverage_config == config
+
+      @native_coverage_config = config
+      @native_coverage = Coverage.new(
+        root: config[0],
+        ignored_paths: config[1],
+        threads: config[2]
+      )
+    end
 
     def normalized_root
       path = @root&.to_s
@@ -145,10 +157,15 @@ module FastCov
       File.absolute_path?(path)
     end
 
+    # Relative paths resolve against root, not the process working directory.
+    # #stop hands back root-relative paths, and callers feed those straight
+    # back into #connect (FixtureKitTracker does exactly this), so anchoring
+    # on Dir.pwd silently dropped every such edge unless root happened to
+    # equal the working directory.
     def normalize_path(path)
       return if path.nil?
 
-      File.expand_path(path.to_s)
+      File.expand_path(path.to_s, normalized_root)
     end
 
     def cleanup_failed_start

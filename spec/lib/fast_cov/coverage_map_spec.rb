@@ -117,6 +117,37 @@ RSpec.describe FastCov::CoverageMap do
     end
   end
 
+  describe "#connect" do
+    it "resolves relative paths against root, not the working directory" do
+      coverage = described_class.new
+      coverage.root = fixtures_path("calculator")
+
+      # #stop hands back root-relative paths, and callers feed them straight
+      # back into #connect.
+      coverage.connect(from: "calculator.rb", to: "operations/add.rb")
+
+      paths = Set.new([fixtures_path("calculator/calculator.rb")])
+      coverage.connected_dependencies.expand(paths)
+
+      expect(paths).to include(fixtures_path("calculator/operations/add.rb"))
+    end
+
+    it "still accepts absolute paths" do
+      coverage = described_class.new
+      coverage.root = fixtures_path("calculator")
+
+      coverage.connect(
+        from: fixtures_path("calculator/calculator.rb"),
+        to: fixtures_path("calculator/operations/add.rb")
+      )
+
+      paths = Set.new([fixtures_path("calculator/calculator.rb")])
+      coverage.connected_dependencies.expand(paths)
+
+      expect(paths).to include(fixtures_path("calculator/operations/add.rb"))
+    end
+  end
+
   describe "configuration" do
     it "accepts an absolute root String" do
       coverage = described_class.new
