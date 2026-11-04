@@ -42,7 +42,7 @@ lib/fast_cov/
   test_map.rb         # TestMap — mapping serialization + k-way merge aggregation.
   trackers/
     abstract_tracker.rb    # Base class for the Ruby trackers.
-    file_tracker.rb        # Tracks File.read/File.open and YAML load_file calls.
+    file_tracker.rb        # Tracks File/IO reads, File.open/File.new and YAML load_file calls.
     factory_bot_tracker.rb # Tracks FactoryBot factory definition files.
     const_get_tracker.rb   # Tracks constants resolved via Module#const_get.
     fixture_kit_tracker.rb # Tracks fixture_kit fixture definition files.

@@ -4,7 +4,11 @@ require_relative "abstract_tracker"
 
 module FastCov
   # Tracks files read from disk during coverage (JSON, YAML, .rb templates, etc.)
-  # via File.read, File.open, and YAML load methods.
+  # via the IO read methods (read, binread, readlines, foreach), read-mode
+  # File.open and File.new, and YAML load methods.
+  #
+  # The IO methods are patched on IO itself, and File inherits them, so
+  # File.read and IO.read share one patch and a read is recorded once.
   #
   # YAML methods are patched separately because Bootsnap's compile cache
   # overrides YAML.load_file/safe_load_file to bypass File.open entirely.
@@ -12,6 +16,10 @@ module FastCov
   # Register via: coverage_map.use(FastCov::FileTracker)
   class FileTracker < AbstractTracker
     def install
+      unless IO.singleton_class.ancestors.include?(IoPatch)
+        IO.singleton_class.prepend(IoPatch)
+      end
+
       unless File.singleton_class.ancestors.include?(FilePatch)
         File.singleton_class.prepend(FilePatch)
       end
@@ -21,23 +29,54 @@ module FastCov
       end
     end
 
+    def self.read_mode?(mode)
+      mode.nil? || (mode.is_a?(String) && mode.start_with?("r")) ||
+        (mode.is_a?(Integer) && (mode & (File::WRONLY | File::RDWR)).zero?)
+    end
+
     # The patches are permanent, so each checks active before doing any work.
     # Paths go over raw because AbstractTracker#record normalizes them.
-    module FilePatch
+    module IoPatch
       def read(name, *args, **kwargs, &block)
         super.tap do
           FastCov::FileTracker.record(name) if FastCov::FileTracker.active
         end
       end
 
+      def binread(name, *args, **kwargs, &block)
+        super.tap do
+          FastCov::FileTracker.record(name) if FastCov::FileTracker.active
+        end
+      end
+
+      def readlines(name, *args, **kwargs, &block)
+        super.tap do
+          FastCov::FileTracker.record(name) if FastCov::FileTracker.active
+        end
+      end
+
+      def foreach(name, *args, **kwargs, &block)
+        super.tap do
+          FastCov::FileTracker.record(name) if FastCov::FileTracker.active
+        end
+      end
+    end
+
+    # open and new take a path only on File; on IO they take a file descriptor.
+    module FilePatch
       def open(name, *args, **kwargs, &block)
         super.tap do
           next unless FastCov::FileTracker.active
 
-          mode = args[0]
-          is_read = mode.nil? || (mode.is_a?(String) && mode.start_with?("r")) ||
-                    (mode.is_a?(Integer) && (mode & (File::WRONLY | File::RDWR)).zero?)
-          FastCov::FileTracker.record(name) if is_read
+          FastCov::FileTracker.record(name) if FastCov::FileTracker.read_mode?(args[0])
+        end
+      end
+
+      def new(name, *args, **kwargs, &block)
+        super.tap do
+          next unless FastCov::FileTracker.active
+
+          FastCov::FileTracker.record(name) if FastCov::FileTracker.read_mode?(args[0])
         end
       end
     end

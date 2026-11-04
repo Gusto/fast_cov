@@ -83,7 +83,7 @@ Native line coverage is always enabled. Extra trackers registered with `use` are
 
 ### FileTracker
 
-Tracks files read from disk during coverage, including YAML, JSON, ERB templates, and any file accessed via `File.read`, read-mode `File.open`, `YAML.load_file`, `YAML.safe_load_file`, or `YAML.unsafe_load_file`.
+Tracks files read from disk during coverage, including YAML, JSON, ERB templates, and any file accessed via `read`, `binread`, `readlines` or `foreach` (on `File` or `IO`), read-mode `File.open` or `File.new`, `YAML.load_file`, `YAML.safe_load_file`, or `YAML.unsafe_load_file`.
 
 The YAML methods are patched directly to handle Bootsnap's compile cache, which bypasses `File.open` for YAML files.
 
