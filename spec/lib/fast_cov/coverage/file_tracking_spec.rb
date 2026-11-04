@@ -33,6 +33,80 @@ RSpec.describe "FastCov file tracking" do
       expect(coverage).to include("config.yml")
     end
 
+    it "tracks files read via File.binread" do
+      coverage_map.start
+      File.binread(fixtures_path("calculator", "config.yml"))
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via File.new" do
+      coverage_map.start
+      File.new(fixtures_path("calculator", "config.yml")).close
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via File.readlines" do
+      coverage_map.start
+      File.readlines(fixtures_path("calculator", "config.yml"))
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via File.foreach" do
+      coverage_map.start
+      File.foreach(fixtures_path("calculator", "config.yml")) { |_line| nil }
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via IO.read" do
+      coverage_map.start
+      IO.read(fixtures_path("calculator", "config.yml"))
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via IO.binread" do
+      coverage_map.start
+      IO.binread(fixtures_path("calculator", "config.yml"))
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via IO.readlines" do
+      coverage_map.start
+      IO.readlines(fixtures_path("calculator", "config.yml"))
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "tracks files read via IO.foreach" do
+      coverage_map.start
+      IO.foreach(fixtures_path("calculator", "config.yml")) { |_line| nil }
+      coverage = coverage_map.stop
+
+      expect(coverage).to include("config.yml")
+    end
+
+    it "records a File.read once, though File inherits the IO patch" do
+      allow(FastCov::FileTracker).to receive(:record).and_call_original
+
+      coverage_map.start
+      File.read(fixtures_path("calculator", "config.yml"))
+      coverage_map.stop
+
+      expect(FastCov::FileTracker).to have_received(:record).once
+    end
+
     it "tracks YAML files loaded via YAML.safe_load_file" do
       coverage_map.start
       YAML.safe_load_file(fixtures_path("calculator", "config.yml"))
@@ -126,9 +200,115 @@ RSpec.describe "FastCov file tracking" do
       expect(coverage).not_to include("nonexistent.yml")
     end
 
+    it "does not track files that fail to read via File.binread" do
+      coverage_map.start
+      begin
+        File.binread(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via File.new" do
+      coverage_map.start
+      begin
+        File.new(fixtures_path("calculator", "nonexistent.yml")).close
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via File.readlines" do
+      coverage_map.start
+      begin
+        File.readlines(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via File.foreach" do
+      coverage_map.start
+      begin
+        File.foreach(fixtures_path("calculator", "nonexistent.yml")) { |_line| nil }
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via IO.read" do
+      coverage_map.start
+      begin
+        IO.read(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via IO.binread" do
+      coverage_map.start
+      begin
+        IO.binread(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via IO.readlines" do
+      coverage_map.start
+      begin
+        IO.readlines(fixtures_path("calculator", "nonexistent.yml"))
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
+    it "does not track files that fail to read via IO.foreach" do
+      coverage_map.start
+      begin
+        IO.foreach(fixtures_path("calculator", "nonexistent.yml")) { |_line| nil }
+      rescue Errno::ENOENT
+        # expected
+      end
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("nonexistent.yml")
+    end
+
     it "does not track write operations via File.open" do
       coverage_map.start
       File.open(fixtures_path("calculator", "tmp_write_test.txt"), "w") { |f| f.write("test") }
+      coverage = coverage_map.stop
+
+      expect(coverage).not_to include("tmp_write_test.txt")
+    ensure
+      FileUtils.rm_f(fixtures_path("calculator", "tmp_write_test.txt"))
+    end
+
+    it "does not track write operations via File.new" do
+      coverage_map.start
+      File.new(fixtures_path("calculator", "tmp_write_test.txt"), "w").close
       coverage = coverage_map.stop
 
       expect(coverage).not_to include("tmp_write_test.txt")
