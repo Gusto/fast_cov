@@ -36,7 +36,6 @@ module FastCov
 
     # The patches are permanent, so each checks active before doing any work.
     # Paths go over raw because AbstractTracker#record normalizes them.
-    # Patches that need only the path forward the rest with ... to skip the splat allocations.
     module IoPatch
       def read(name, ...)
         result = super
