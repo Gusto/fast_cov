@@ -63,7 +63,7 @@ module FastCov
       end
     end
 
-    # open and new take a path only on File; on IO they take a file descriptor.
+    # File.open and File.new take a path only on File; on IO they take a file descriptor.
     module FilePatch
       def open(name, *args, **kwargs, &block)
         result = super
