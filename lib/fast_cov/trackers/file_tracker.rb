@@ -36,26 +36,27 @@ module FastCov
 
     # The patches are permanent, so each checks active before doing any work.
     # Paths go over raw because AbstractTracker#record normalizes them.
+    # Patches that need only the path forward the rest with ... to skip the splat allocations.
     module IoPatch
-      def read(name, *args, **kwargs, &block)
+      def read(name, ...)
         result = super
         FastCov::FileTracker.record(name) if FastCov::FileTracker.active
         result
       end
 
-      def binread(name, *args, **kwargs, &block)
+      def binread(name, ...)
         result = super
         FastCov::FileTracker.record(name) if FastCov::FileTracker.active
         result
       end
 
-      def readlines(name, *args, **kwargs, &block)
+      def readlines(name, ...)
         result = super
         FastCov::FileTracker.record(name) if FastCov::FileTracker.active
         result
       end
 
-      def foreach(name, *args, **kwargs, &block)
+      def foreach(name, ...)
         result = super
         FastCov::FileTracker.record(name) if FastCov::FileTracker.active
         result
@@ -82,19 +83,19 @@ module FastCov
     end
 
     module YamlPatch
-      def load_file(path, *args, **kwargs)
+      def load_file(path, ...)
         result = super
         FastCov::FileTracker.record(path) if FastCov::FileTracker.active
         result
       end
 
-      def safe_load_file(path, *args, **kwargs)
+      def safe_load_file(path, ...)
         result = super
         FastCov::FileTracker.record(path) if FastCov::FileTracker.active
         result
       end
 
-      def unsafe_load_file(path, *args, **kwargs)
+      def unsafe_load_file(path, ...)
         result = super
         FastCov::FileTracker.record(path) if FastCov::FileTracker.active
         result
